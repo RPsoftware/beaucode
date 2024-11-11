@@ -1,0 +1,84 @@
+{
+	"name": "quantium_segments_inbound",
+	"properties": {
+		"activities": [
+			{
+				"name": "download blobs",
+				"description": "download blobs from quantium storage",
+				"type": "DatabricksNotebook",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.19:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/3rdparty/quantium/downloadblobs"
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_dbr_quantium",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "landingFailureAlert",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "download blobs",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"url": {
+						"value": "@variables('CeEmail')",
+						"type": "Expression"
+					},
+					"connectVia": {
+						"referenceName": "AutoResolveIntegrationRuntime",
+						"type": "IntegrationRuntimeReference"
+					},
+					"method": "POST",
+					"body": {
+						"value": "{\n'ceEmail': '@{variables('CeEmail')}',\n'subject' : '@{variables('Subject')}',\n'DataFactoryName'  :  '@{pipeline().DataFactory}',\n'Pipeline' :  '@{pipeline().Pipeline}',\n'PipelineRunID' :  '@{pipeline().RunId}',\n'PipelineTriggerID' :  '@{pipeline().TriggerId}',\n'sourceTime': 'utcnow()',\n}",
+						"type": "Expression"
+					}
+				}
+			}
+		],
+		"variables": {
+			"CeEmail": {
+				"type": "String"
+			},
+			"Subject": {
+				"type": "String"
+			},
+			"database": {
+				"type": "String"
+			},
+			"askID": {
+				"type": "String"
+			},
+			"entityName": {
+				"type": "String"
+			}
+		},
+		"folder": {
+			"name": "quantium"
+		},
+		"annotations": []
+	}
+}

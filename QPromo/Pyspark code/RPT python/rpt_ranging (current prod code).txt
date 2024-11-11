@@ -1,0 +1,78 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+from pyspark.sql import SQLContext
+from pyspark.sql.functions import date_format
+import pyspark.sql.functions as F
+
+
+
+class ranging:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_rpt_database"]["extraction_database"]
+        self.target_table = cnt["Customer_Staging_Mart"]["cdd_rpt_tables"]["cdd_rpt_Ranging"]
+        #source details
+        self.source_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.source_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_ranging"]
+        # calendar
+        self.calendar_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.calendar_table = cnt["Customer_Staging_Mart"]["csm_tables"]["dim_calendar"]
+
+
+    def run(self):
+        print("*******************Execution Start*********************")
+        sqlContext = SQLContext(spark)
+
+        # temp soln to automate the process from ftdw
+
+        df_drop = spark.sql(''' drop table IF EXISTS {}.{} '''.format(self.target_db, self.target_table))
+
+        df_cal_raw = spark.sql(
+            '''SELECT day_date,asda_wk_nbr FROM {}.{}'''.format(self.calendar_db, self.calendar_table))
+
+        df_cal = df_cal_raw.select(date_format(df_cal_raw.day_date, 'yyyyMMdd').alias('day_date'),
+                                   df_cal_raw.asda_wk_nbr)
+
+        df_cal_promo_wid = df_cal.groupBy('asda_wk_nbr').agg(F.max('day_date').alias("PROMOTION_WEEK_ID"))
+
+        df_cal_promo_wid.createOrReplaceTempView("dim_Calendar")
+
+        df_ranging_odl = spark.sql('''SELECT distinct cast(dc.PROMOTION_WEEK_ID as int) as asda_wk_nbr,
+                                      cons_item_nbr ,r.original_cin, cast(STORE_NBR as int) as store_nbr, traited as traited_ind
+                                                      FROM
+                                            gb_customer_data_domain_odl.cdd_odl_ranging r
+                                            join dim_Calendar dc
+                                            on r.asda_wk_number = dc.asda_wk_nbr
+                                            where cons_item_nbr !=0 ''')
+ 
+
+        table_list = sqlContext.tableNames(self.target_db)
+
+        if self.target_table in table_list:
+            df_ranging = spark.sql('SELECT cons_item_nbr,store_nbr, ORIGINAL_CIN,asda_wk_nbr FROM {}.{}'.format(self.target_db, self.target_table))
+
+            df_new_ranging = df_ranging_odl.join(df_ranging, (df_ranging.cons_item_nbr == df_ranging_odl.cons_item_nbr) & (df_ranging.ORIGINAL_CIN == df_ranging_odl.ORIGINAL_CIN) &  (df_ranging.store_nbr == df_ranging_odl.store_nbr) & (df_ranging.asda_wk_nbr == df_ranging_odl.asda_wk_nbr), how='LEFT_ANTI')
+            df_new_ranging.select('asda_wk_nbr','cons_item_nbr','original_cin','store_nbr','traited_ind').write.insertInto(self.target_db +'.'+ self.target_table, overwrite=False)
+        else:
+
+            df_full_ranging = spark.sql('''SELECT distinct cast(dc.PROMOTION_WEEK_ID as int) as asda_wk_nbr,
+                                       cons_item_nbr, r.ORIGINAL_CIN, cast(STORE_NBR as int) as store_nbr, traited as traited_ind
+                                                     FROM
+                                            gb_customer_data_domain_odl.cdd_odl_ranging r
+                                            join dim_Calendar dc
+                                            on r.asda_wk_number = dc.asda_wk_nbr
+                                            where cons_item_nbr !=0 ''')
+
+
+            df_full_ranging.select('asda_wk_nbr','cons_item_nbr','original_cin','store_nbr','traited_ind').write.partitionBy("asda_wk_nbr").mode("overwrite").saveAsTable(
+                "{}.{}".format(self.target_db, self.target_table))
+
+
+        print("*******************Execution End*********************")
+
+
+aa = ranging()
+aa.run()

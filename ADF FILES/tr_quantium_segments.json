@@ -1,0 +1,33 @@
+{
+	"name": "tr_quantium_segments",
+	"properties": {
+		"description": "trigger for inbound segments pipeline",
+		"annotations": [],
+		"runtimeState": "Started",
+		"pipelines": [
+			{
+				"pipelineReference": {
+					"referenceName": "quantium_segments_inbound",
+					"type": "PipelineReference"
+				}
+			}
+		],
+		"type": "ScheduleTrigger",
+		"typeProperties": {
+			"recurrence": {
+				"frequency": "Day",
+				"interval": 1,
+				"startTime": "2023-12-25T04:00:00",
+				"timeZone": "GMT Standard Time",
+				"schedule": {
+					"minutes": [
+						0
+					],
+					"hours": [
+						3
+					]
+				}
+			}
+		}
+	}
+}

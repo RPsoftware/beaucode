@@ -1,0 +1,75 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+from pyspark.sql.window import *
+import pyspark.sql.functions as F
+
+class GrocProd:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        self.target_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.target_table = cnt["Customer_Staging_Mart"]["csm_tables"]["dim_groc_prod"]
+        self.source_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.source_table = cnt["Datalake"]["source_tables"]["groc_prod"]
+
+
+    def run(self):
+        print("************** SPARK JOB Inititated****************")
+
+        sql_text = '''SELECT sku_id, cons_item_nbr, sku_type_cd, prmry_shelf_id, prmry_aisle_id, "
+                              "prmry_dept_id, prmry_catg_id, extd_taxonomy_desc, tot_ratg_nbr, avg_ratg_nbr, "
+                              "prod_rstr_txt, upc_lst_txt, untraited_store_lst_txt, prod_id, disp_onln_ind, "
+                              "prod_status_nm, prod_start_dt, prod_end_dt, prod_disp_nm, prod_desc, cart_desc, "
+                              "brand_nm, addl_info_txt, picker_desc, addl_picker_desc, sales_type_cd, avg_wt_qty, "
+                              "max_allow_qty, max_allow_home_shopping_cntr_qty, coming_soon_txt, sub_ind, "
+                              "bws_rstr_ind, pharm_rstr_ind, meta_srch_keywords_txt, prod_scene_img_id, "
+                              "prod_scene_img_host_nm, promo_type_cd, promo_start_dt, promo_end_dt, "
+                              "coming_soon_prod_price_ind, on_sale_ind, promo_was_price_amt, frsh_dys_cnt, "
+                              "frsh_min_dys_cnt, frsh_max_dys_cnt, sell_by_dt, favourites_isrt_ind, "
+                              "favourites_isrt_start_dt, favourites_isrt_end_dt, remove_from_cust_shopping_lst_ind, "
+                              "favourites_remove_ind, bundle_lst_txt, bundle_price_amt, icon_lst_txt, facet_lst_txt, "
+                              "sub_lst_txt, cust_base_rtl_amt, base_unit_rtl_amt, sell_qty, unit_cost_amt, "
+                              "price_comp_qty, vnpk_qty, vnpk_cube_qty, vnpk_wt_qty, dept_nbr, create_dt, upd_dt, "
+                              "us_upc, prod_status_cd, sell_uom_cd, price_comp_uom_cd, uniq_prod_id, "
+                              "vnpk_cube_uom_cd, vnpk_wt_uom_cd, last_modfd_ind, price_upd_ind, prod_size_qty, "
+                              "item_status_cd, assoc_disc_ind, eu_upc, src_rcv_ts, load_ts, load_userid, upd_ts, "
+                              "upd_userid, asset_type, win_nbr, bws_ind, fineline_nbr, repl_unit_ind, repl_ind, "
+                              "item_subclass_map_json, prmry_shelf, pub_ind, bb_json_txt, ean_id, "
+                              "bb_nutritional_info_json_txt, bb_nutritional_val_json_txt, src_pub_dt 
+							  FROM gb_product_dl_tables.groc_prod '''
+
+
+        source_df = spark.sql(sql_text)
+
+        source_df = source_df.filter(F.col('cons_item_nbr').isNotNull())
+
+        source_df = source_df.withColumn("us_upc_nbr", F.col('us_upc')).withColumn("eu_upc_nbr",F.col('eu_upc')).withColumn("asset_type_cd", F.col('asset_type')).withColumn("item_subclass_map_json_desc",F.col('item_subclass_map_json')).withColumn("prmry_shelf_nbr", F.col('prmry_shelf'))
+
+        #source_df = source_df.withColumn("row_num", F.row_number().over(Window.partitionBy("cons_item_nbr").orderBy(F.desc("src_pub_dt"))))
+
+        #source_df = source_df.filter(F.col('row_num') == 1).drop('row_num')
+
+        source_df = source_df.select(
+            ("sku_id"),("cons_item_nbr"),("sku_type_cd"),("prmry_shelf_id"),("prmry_aisle_id"),("prmry_dept_id"),("prmry_catg_id"),("extd_taxonomy_desc"),
+            ("tot_ratg_nbr"),("avg_ratg_nbr"),("prod_rstr_txt"),("upc_lst_txt"),("untraited_store_lst_txt"),("prod_id"),("disp_onln_ind"),("prod_status_nm"),
+            ("prod_start_dt"),("prod_end_dt"),("prod_disp_nm"),("prod_desc"),("cart_desc"),("brand_nm"),("addl_info_txt"),("picker_desc"),("addl_picker_desc"),
+            ("sales_type_cd"),("avg_wt_qty"),("max_allow_qty"),("max_allow_home_shopping_cntr_qty"),("coming_soon_txt"),("sub_ind"),("bws_rstr_ind"),("pharm_rstr_ind"),
+            ("meta_srch_keywords_txt"),("prod_scene_img_id"),("prod_scene_img_host_nm"),("promo_type_cd"),("promo_start_dt"),("promo_end_dt"),("coming_soon_prod_price_ind"),
+            ("on_sale_ind"),("promo_was_price_amt"),("frsh_dys_cnt"),("frsh_min_dys_cnt"),("frsh_max_dys_cnt"),("sell_by_dt"),("favourites_isrt_ind"),
+            ("favourites_isrt_start_dt"),("favourites_isrt_end_dt"),("remove_from_cust_shopping_lst_ind"),("favourites_remove_ind"),("bundle_lst_txt"),("bundle_price_amt"),
+            ("icon_lst_txt"),("facet_lst_txt"),("sub_lst_txt"),("cust_base_rtl_amt"),("base_unit_rtl_amt"),("sell_qty"),("unit_cost_amt"),("price_comp_qty"),("vnpk_qty"),
+            ("vnpk_cube_qty"),("vnpk_wt_qty"),("dept_nbr"),("create_dt"),("upd_dt"),("us_upc_nbr"),("prod_status_cd"),("sell_uom_cd"),("price_comp_uom_cd"),("uniq_prod_id"),
+            ("vnpk_cube_uom_cd"),("vnpk_wt_uom_cd"),("last_modfd_ind"),("price_upd_ind"),("prod_size_qty"),("item_status_cd"),("assoc_disc_ind"),("eu_upc_nbr"),("src_rcv_ts"),
+            ("load_ts"),("load_userid"),("upd_ts"),("upd_userid"),("asset_type_cd"),("win_nbr"),("bws_ind"),("fineline_nbr"),("repl_unit_ind"),("repl_ind"),
+            ("item_subclass_map_json_desc"),("prmry_shelf_nbr"),("pub_ind"),("bb_json_txt"),("ean_id"),("bb_nutritional_info_json_txt"),
+            ("bb_nutritional_val_json_txt"),("src_pub_dt"))
+
+        source_df.write.mode("overwrite").saveAsTable("{}.{}".format(self.target_db,self.target_table))
+
+        print("************** SPARK JOB complete****************")
+
+
+aa = GrocProd()
+aa.run()
+

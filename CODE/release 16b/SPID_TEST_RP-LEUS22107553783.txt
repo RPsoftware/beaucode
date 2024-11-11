@@ -1,0 +1,126 @@
+from cip.cip.framework.connections.spark import spark 
+from cip.cip.framework.files.read import cnt 
+from datetime import datetime, timedelta 
+import pyspark.sql.functions as F 
+from pyspark.sql.types import  DecimalType, StringType, TimestampType 
+from pyspark.sql.window import * 
+
+
+class transID: 
+
+    def __init__(self): 
+
+        """ 
+        Assigning Variable from config file 
+        """ 
+
+        # Target Table 
+        #self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"] 
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_transaction_ids"] 
+        self.target_db = 'gb_customer_data_domain_odl' 
+        self.target_table = 'cdd_odl_SPID_TEST' 
+
+        # Source Databases 
+
+        self.staging_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"] 
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"] 
+
+        # Src Tables 
+        #self.store_visit = cnt["Customer_Staging_Mart"]["csm_tables"]["cdd_raw_store_visit"] 
+        self.store_visit = 'cdd_raw_store_visit' 
+        #self.store_trans = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_store_transaction"] 
+        self.store_trans = 'cdd_raw_store_transaction' 
+        #self.sng = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_sng_visit"] 
+        self.sng = 'cdd_raw_sng_visit' 
+  
+
+ 
+    def run(self): 
+
+  
+
+        # Ingest data from hive tables and store as df for later transformation and joins 
+        # assign max/min date to help with historical data load 
+
+        min_date = '2021-09-15' 
+        max_date = '2022-03-15' 
+
+  
+        sv_df = spark.sql("SELECT visit_dt, visit_nbr, store_nbr, visit_ts, trans_nbr, reg_nbr, visit_subtype_cd \ 
+
+                                                                        FROM {}.{} WHERE visit_dt >= '{}' AND visit_dt <= '{}'".format(self.staging_db,self.store_visit, min_date, max_date)) 
+
+  
+
+        # Filter dates to match date range of store_visit. This helps speed of processing data in getNonScanFlag method below. 
+
+        sv_max_date = sv_df.agg(F.max('visit_dt')).collect()[0][0] 
+
+        sv_min_date = sv_df.agg(F.min('visit_dt')).collect()[0][0] 
+
+  
+
+  
+
+  
+
+        s_trns_df = spark.sql("SELECT visit_date, visit_nbr, store_nbr, tc_nbr FROM {}.{} WHERE receipt_seq_nbr = '0' AND visit_date >= '{}' AND visit_date <= '{}'"\ 
+
+                                                                .format(self.staging_db,self.store_trans, sv_min_date, sv_max_date)) 
+
+ 
+
+        sng_df = spark.sql("SELECT cust_singl_profl_id, cart_id as sngv_cart_id, trans_cd, trans_nbr FROM {}.{}".format(self.staging_db,self.sng)) 
+
+        sng_unq_df = sng_df.groupBy('trans_cd').agg(F.count('cust_singl_profl_id').alias('cnt_spid')).filter(F.col('cnt_spid') == 1) 
+        sng_unq_df = sng_df.join(sng_unq_df, on=['trans_cd'], how = 'INNER') 
+
+        sng_dup_df = sng_df.groupby('trans_cd').agg(F.count('cust_singl_profl_id').alias('cnt_spid')).filter(F.col('cnt_spid') > 1) 
+        sng_dup_df = sng_df.join(sng_dup_df, on=['trans_cd'], how = 'INNER') 
+
+  
+
+        # Add derived basket_id to store_visit, scan, store_tender and sng_matching 
+        sv_df = sv_df.withColumn("basket_id", F.concat((F.col("visit_dt").cast(StringType())), (F.col("store_nbr")), (F.col("visit_nbr")))) 
+        sv_df = sv_df.withColumn("basket_id", F.regexp_replace('basket_id', '-', '').cast(DecimalType(38,0))) 
+
+        s_trns_df = s_trns_df.withColumn("basket_id", F.concat((F.col("visit_date").cast(StringType())), (F.col("store_nbr")), (F.col("visit_nbr")))) 
+        s_trns_df = s_trns_df.withColumn("basket_id", F.regexp_replace('basket_id', '-', '').cast(DecimalType(38,0))) 
+
+ 
+        ## CALL FUNCTIONS ## 
+
+        sv_df = self.getCSPID (sv_df, s_trns_df, sng_unq_df, sng_dup_df) 
+
+        # write to table 
+        sv_df.write.partitionBy('visit_dt').mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table)) 
+
+    @staticmethod 
+
+    def getCSPID (sv_df, s_trns_df, sng_unq_df, sng_dup_df): 
+
+        sv_df = sv_df.join(s_trns_df, on=['basket_id'], how = 'LEFT').drop(s_trns_df.visit_nbr).drop(s_trns_df.store_nbr).drop(s_trns_df.visit_date) 
+         
+        # from the two dataframes created in the main program, fetch the correct SPID and sngv_cart_id -- if the SPID is distinct then match on tc_nbr = trans_cd BUT if SPID is a duplicate match on trans_nbr = trans_nbr as well ## 
+        sng_unq_df = sng_unq_df.select('trans_cd', F.col('cust_singl_profl_id').alias('unq_spid'), F.col('sngv_cart_id').alias('unq_cart_id')) 
+
+        sv_df = sv_df.join(sng_unq_df, on=[(sv_df.tc_nbr == sng_unq_df.trans_cd)], how = 'LEFT') 
+
+        sng_dup_df = sng_dup_df.select(F.col('trans_nbr').alias('dup_tnbr'),'trans_cd', F.col('cust_singl_profl_id').alias('dup_spid'), F.col('sngv_cart_id').alias('dup_cart_id')) 
+
+        sv_df = sv_df.join(sng_dup_df, on=[(sv_df.tc_nbr == sng_dup_df.trans_cd) & (sv_df.trans_nbr == sng_dup_df.dup_tnbr)], how='LEFT') 
+
+        sv_df = sv_df.withColumn('cust_singl_profl_id', F.expr("CASE WHEN dup_spid IS NOT NULL THEN dup_spid ELSE unq_spid END")) 
+
+        sv_df = sv_df.withColumn('sngv_cart_id', F.expr("CASE WHEN dup_cart_id IS NOT NULL THEN dup_cart_id ELSE unq_cart_id END")) 
+
+        sv_df = sv_df.select('basket_id', 'visit_dt', 'store_nbr', 'visit_nbr', 'visit_ts', 'trans_nbr', 'reg_nbr', 'visit_subtype_cd', 'tc_nbr', 'cust_singl_profl_id', 'sngv_cart_id', 'non_scan_visit_ind')\ 
+        .drop(s_trns_df.tc_nbr) 
+
+        sv_df.repartition('visit_dt') 
+        return(sv_df) 
+  
+ts = transID() 
+ts.run() 
+
+ 

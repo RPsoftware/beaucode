@@ -1,0 +1,664 @@
+from cip.cip.framework.connections.spark import spark
+import datetime
+import subprocess
+import pyspark.sql.functions as F
+from pyspark.sql.types import DecimalType, StringType, DateType
+
+class rpt_offers:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+
+        #TARGET TABLE
+        self.rpt_db = 'gb_customer_data_domain_rpt'
+        self.target_table = 'cdd_rpt_qpromo_offers'
+
+        #SOURCE TABLES
+        self.odl_db = 'gb_customer_data_domain_odl'
+        self.dih = 'cdd_odl_dim_item_hierarchy'
+        self.prod = 'cdd_rpt_product'
+
+    def run(self):
+        print("************** SPARK JOB Initiated****************")
+
+        df_Promo_Daily_Final_item_key = spark.sql(""" select * from  gb_customer_data_domain_odl.cdd_odl_qpromo_offers_stg2""")
+        df_Promo_Daily_Final_item_key = df_Promo_Daily_Final_item_key.withColumn("consumer_item_nbr", df_Promo_Daily_Final_item_key.original_cin)
+        df_Promo_Daily_Final_item_key.createOrReplaceTempView("Promo_Daily_Final_item_key")
+
+        df_Main_Estate_Price_grouped = spark.sql(""" SELECT
+                        COLLECTION_DATE
+                        , Consumer_item_nbr
+                        , Promo_ID_Key_Concat2
+                        , item_barcode
+                        , ASDA_Promo_Type
+                        , Promo_ID_Key_RB
+                        , Rollback_prod_Start
+                        , Rollback_Prod_End
+                        , Promo_ID_KEY_LS
+                        , ASDA_linksave_desc
+                        , Linksave_prod_Start
+                        , Linksave_Prod_End
+                        , Linksave_Promo_Strt_Dt
+                        , Linksave_Promo_End_Dt
+                        , Linksave_Qty_Trigger
+                        , Linksave_Total_Price_Fixed
+                        , Linksave_Unit_Price_Fixed
+                        , Promo_Start_Date AS Promo_Start_Date
+                        , Promo_End_Date AS Promo_End_Date
+                        , 'Main Estate' AS PRICING_STORE_FORMAT
+                        FROM Promo_Daily_Final_item_key """)
+
+        df_Main_Estate_Price_grouped.createOrReplaceTempView("Main_Estate_Price_grouped")
+
+        df_Main_Estate_Price_grouped = spark.sql(""" SELECT t.*, CASE WHEN Linksave_Total_Price_Fixed = LAG(Linksave_Total_Price_Fixed)
+                        OVER (PARTITION BY Promo_ID_Key_Concat2, item_barcode, consumer_item_nbr, Asda_promo_type ORDER BY collection_date)
+                        THEN 0 ELSE 1 END AS price_change
+                        FROM Main_Estate_Price_Grouped t """)
+
+        df_Main_Estate_Price_grouped.createOrReplaceTempView("Main_Estate_Price_grouped")
+		
+		df_Main_Estate_Price_grouped = spark.sql(""" SELECT t.*, SUM(price_change)
+                        OVER (PARTITION BY Promo_ID_Key_Concat2, item_barcode, consumer_item_nbr, Asda_promo_type
+                        ORDER BY collection_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as price_grouping
+                        FROM Main_Estate_Price_Grouped t """)
+
+        df_Main_Estate_Price_grouped.createOrReplaceTempView("Main_Estate_Price_grouped")
+		
+		df_MAIN_ESTATE_BASE = spark.sql(""" SELECT
+                    Promo_ID_Key_Concat2
+                    , Consumer_item_nbr
+                    , item_barcode
+                    , ASDA_Promo_Type
+                    , Promo_ID_Key_RB
+                    , Rollback_prod_Start
+                    , Rollback_Prod_End
+                    , Promo_ID_KEY_LS
+                    , ASDA_linksave_desc
+                    , Linksave_prod_Start
+                    , Linksave_Prod_End
+                    , Linksave_Promo_Strt_Dt
+                    , Linksave_Promo_End_Dt
+                    , Linksave_Qty_Trigger
+                    , Linksave_Total_Price_Fixed
+                    , Linksave_Unit_Price_Fixed
+                    , PRICE_GROUPING
+                    , MIN(COLLECTION_DATE) AS MIN_COLLECTION_DATE
+                    , MAX(COLLECTION_DATE) AS MAX_COLLECTION_DATE
+                    , MIN(Promo_Start_Date) AS Promo_Start_Date
+                    , MAX(Promo_End_Date) AS Promo_End_Date
+                    , 'Main Estate' AS PRICING_STORE_FORMAT
+                FROM Main_Estate_Price_grouped
+               GROUP BY Promo_ID_Key_Concat2, item_barcode, consumer_item_nbr, ASDA_Promo_Type, Promo_ID_Key_RB,
+                        Rollback_prod_Start, Rollback_Prod_End, Promo_ID_KEY_LS, ASDA_linksave_desc , Linksave_prod_Start
+                        , Linksave_Prod_End, Linksave_Promo_Strt_Dt, Linksave_Promo_End_Dt, Linksave_Qty_Trigger, Linksave_Total_Price_Fixed
+                        , Linksave_Unit_Price_Fixed, PRICE_GROUPING """)
+
+        df_MAIN_ESTATE_BASE.createOrReplaceTempView("MAIN_ESTATE_BASE")
+
+	    df_SUPERMARKET_PRICE_GROUPED = spark.sql(""" SELECT
+                              COLLECTION_DATE
+                            , Promo_ID_KEY_Concat_SM2
+                            ,consumer_item_nbr
+                            , item_barcode
+                            , Supermarket_promo_type
+                            , Promo_ID_KEY_RBSM
+                            , Supermarket_Rollback_prod_Start
+                            , Supermarket_Rollback_prod_End
+                            , Promo_ID_KEY_LSSM
+                            , Supermarket_Linksave_Desc
+                            , Supermarket_Linksave_prod_Start
+                            , Supermarket_Linksave_prod_End
+                            , Supermarket_Linksave_Promo_Strt_Dt
+                            , Supermarket_Linksave_Promo_End_Dt
+                            , Supermarket_Linksave_Qty_Trigger
+                            , Supermarket_Linksave_Total_Price_Fixed
+                            , Supermarket_Linksave_Unit_Price_Fixed
+                            , Promo_Start_Date AS Promo_Start_Date
+                            , Promo_End_Date AS Promo_End_Date
+                            , 'Supermarket' AS PRICING_STORE_FORMAT
+                    FROM Promo_Daily_Final_item_key """)
+
+        df_SUPERMARKET_PRICE_GROUPED.createOrReplaceTempView("SUPERMARKET_PRICE_GROUPED")
+
+        df_SUPERMARKET_PRICE_GROUPED = spark.sql(""" SELECT t.*, CASE WHEN Supermarket_Linksave_Total_Price_Fixed = LAG(Supermarket_Linksave_Total_Price_Fixed)
+                                                        OVER (PARTITION BY Promo_ID_KEY_Concat_SM2, item_barcode, consumer_item_nbr,  Supermarket_promo_type
+                                                                                                                                ORDER BY collection_date)
+                                                                                                                                THEN 0 ELSE 1 END AS price_change
+                                                                FROM SUPERMARKET_PRICE_GROUPED  t """)
+        df_SUPERMARKET_PRICE_GROUPED.createOrReplaceTempView("SUPERMARKET_PRICE_GROUPED")
+
+        df_SUPERMARKET_PRICE_GROUPED = spark.sql(""" SELECT t.*, SUM(price_change) OVER
+                                                (PARTITION BY Promo_ID_KEY_Concat_SM2, item_barcode, consumer_item_nbr, Supermarket_promo_type
+                                                        ORDER BY collection_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as PRICE_GROUPING
+                                                FROM SUPERMARKET_PRICE_GROUPED  t""")
+
+        df_SUPERMARKET_PRICE_GROUPED.createOrReplaceTempView("SUPERMARKET_PRICE_GROUPED")
+		
+		df_SUPERMARKET_BASE = spark.sql(""" SELECT Promo_ID_KEY_Concat_SM2
+                                                ,consumer_item_nbr
+                                                , item_barcode
+                                                , Supermarket_promo_type
+                                                , Promo_ID_KEY_RBSM
+                                                , Supermarket_Rollback_prod_Start
+                                                , Supermarket_Rollback_prod_End
+                                                , Promo_ID_KEY_LSSM
+                                                , Supermarket_Linksave_Desc
+                                                , Supermarket_Linksave_prod_Start
+                                                , Supermarket_Linksave_prod_End
+                                                , Supermarket_Linksave_Promo_Strt_Dt
+                                                , Supermarket_Linksave_Promo_End_Dt
+                                                , Supermarket_Linksave_Qty_Trigger
+                                                , Supermarket_Linksave_Total_Price_Fixed
+                                                , Supermarket_Linksave_Unit_Price_Fixed
+                                                , PRICE_GROUPING
+                                                , MIN(COLLECTION_DATE) AS MIN_COLLECTION_DATE
+                                                , MAX(COLLECTION_DATE) AS MAX_COLLECTION_DATE
+                                                , MIN(Promo_Start_Date) AS Promo_Start_Date
+                                                , MAX(Promo_End_Date) AS Promo_End_Date
+                                                , 'Supermarket' AS PRICING_STORE_FORMAT
+                                                        FROM SUPERMARKET_PRICE_GROUPED
+        GROUP BY Promo_ID_KEY_Concat_SM2, item_barcode, consumer_item_nbr, Supermarket_promo_type, Promo_ID_KEY_RBSM,
+        Supermarket_Rollback_prod_Start, Supermarket_Rollback_prod_End
+        , Promo_ID_KEY_LSSM, Supermarket_Linksave_Desc, Supermarket_Linksave_prod_Start, Supermarket_Linksave_prod_End, Supermarket_Linksave_Promo_Strt_Dt
+        , Supermarket_Linksave_Promo_End_Dt, Supermarket_Linksave_Qty_Trigger , Supermarket_Linksave_Total_Price_Fixed, Supermarket_Linksave_Unit_Price_Fixed
+                                                                                , PRICE_GROUPING """)
+
+        df_SUPERMARKET_BASE.createOrReplaceTempView("SUPERMARKET_BASE")
+
+        df_CONVENIENCE_PRICE_GROUPED = spark.sql(""" SELECT
+                        COLLECTION_DATE
+                        , Promo_ID_Key_Concat_CV2
+                        ,consumer_item_nbr
+                        , item_barcode
+                        , Convenience_Promo_Type
+                        , Promo_ID_Key_RBCV
+                        , Convenience_Rollback_prod_Start
+                        , Convenience_Rollback_prod_End
+                        , Promo_ID_KEY_LSCV
+                        , Convenience_Linksave_Desc
+                        , Convenience_Linksave_prod_Start
+                        , Convenience_Linksave_prod_End
+                        , Convenience_Linksave_Promo_Strt_Dt
+                        , Convenience_Linksave_Promo_End_Dt
+                        , Convenience_Linksave_Qty_Trigger
+                        , Convenience_Linksave_Total_Price_Fixed
+                        , Convenience_Linksave_Unit_Price_Fixed
+                        , Promo_Start_Date AS Promo_Start_Date
+                        , Promo_End_Date AS Promo_End_Date
+                        , 'Convenience' AS PRICING_STORE_FORMAT
+                    FROM Promo_Daily_Final_item_key """)
+
+        df_CONVENIENCE_PRICE_GROUPED.createOrReplaceTempView("CONVENIENCE_PRICE_GROUPED")
+	
+		df_CONVENIENCE_PRICE_GROUPED = spark.sql("""SELECT t.*, CASE WHEN Convenience_Linksave_Total_Price_Fixed = LAG(Convenience_Linksave_Total_Price_Fixed)
+                                                    OVER (PARTITION BY Promo_ID_Key_Concat_CV2, item_barcode, consumer_item_nbr, Convenience_Promo_Type ORDER BY collection_date)
+                                                    THEN 0 ELSE 1 END as price_change
+                                                    from CONVENIENCE_PRICE_GROUPED t """)
+
+        df_CONVENIENCE_PRICE_GROUPED.createOrReplaceTempView("CONVENIENCE_PRICE_GROUPED")
+
+        df_CONVENIENCE_PRICE_GROUPED = spark.sql("""SELECT t.*, SUM(price_change) OVER (PARTITION BY Promo_ID_Key_Concat_CV2, item_barcode, consumer_item_nbr, Convenience_Promo_Type
+                                                  ORDER BY collection_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as PRICE_GROUPING
+                                                 FROM CONVENIENCE_PRICE_GROUPED t """)
+
+        df_CONVENIENCE_PRICE_GROUPED.createOrReplaceTempView("CONVENIENCE_PRICE_GROUPED")
+
+        df_CONVENIENCE_BASE = spark.sql(""" SELECT Promo_ID_Key_Concat_CV2
+                                ,consumer_item_nbr
+                                , item_barcode
+                                , Convenience_Promo_Type
+                                , Promo_ID_Key_RBCV
+                                , Convenience_Rollback_prod_Start
+                                , Convenience_Rollback_prod_End
+                                , Promo_ID_KEY_LSCV
+                                , Convenience_Linksave_Desc
+                                , Convenience_Linksave_prod_Start
+                                , Convenience_Linksave_prod_End
+                                , Convenience_Linksave_Promo_Strt_Dt
+                                , Convenience_Linksave_Promo_End_Dt
+                                , Convenience_Linksave_Qty_Trigger
+                                , Convenience_Linksave_Total_Price_Fixed
+                                , Convenience_Linksave_Unit_Price_Fixed
+                                , PRICE_GROUPING
+                                , MIN(COLLECTION_DATE) AS MIN_COLLECTION_DATE
+                                , MAX(COLLECTION_DATE) AS MAX_COLLECTION_DATE
+                                , MIN(Promo_Start_Date) AS Promo_Start_Date
+                                , MAX(Promo_End_Date) AS Promo_End_Date
+                                , 'Convenience' AS PRICING_STORE_FORMAT
+                            FROM CONVENIENCE_PRICE_GROUPED
+                            GROUP BY Promo_ID_Key_Concat_CV2, item_barcode, consumer_item_nbr, Convenience_Promo_Type, Promo_ID_Key_RBCV, Convenience_Rollback_prod_Start, Convenience_Rollback_prod_End
+                        , Promo_ID_KEY_LSCV, Convenience_Linksave_Desc, Convenience_Linksave_prod_Start, Convenience_Linksave_prod_End, Convenience_Linksave_Promo_Strt_Dt
+                , Convenience_Linksave_Promo_End_Dt, Convenience_Linksave_Qty_Trigger, Convenience_Linksave_Total_Price_Fixed, Convenience_Linksave_Unit_Price_Fixed
+                                                        , PRICE_GROUPING """)
+
+        df_CONVENIENCE_BASE.createOrReplaceTempView("CONVENIENCE_BASE")	
+		
+	    df_ME_ROLLBACK_PROMOS = spark.sql(""" SELECT Promo_ID_Key_Concat2
+                    , PRICING_STORE_FORMAT, consumer_item_nbr
+                    , item_barcode
+                    , ASDA_Promo_Type
+                    , CASE WHEN ASDA_Promo_Type = 'Rollback' THEN Promo_ID_Key_Concat2 else Promo_ID_Key_RB end as Promo_ID_Key_RB
+                    , min_rollback_start_dt as Rollback_prod_start_dt
+                    , max_rollback_start_dt as Rollback_prod_end_dt
+                    , Promo_ID_KEY_LS
+                    , ASDA_linksave_desc
+                    , Linksave_prod_Start
+                    , Linksave_Prod_End
+                    , Linksave_Promo_Strt_Dt
+                    , Linksave_Promo_End_Dt
+                    , Linksave_Qty_Trigger
+                    , Linksave_Total_Price_Fixed
+                    , Linksave_Unit_Price_Fixed
+                    , MIN_COLLECTION_DATE
+                    , MAX_collection_Date
+                FROM (
+                SELECT *
+                    , MIN(rollback_prod_start) OVER (PARTITION BY Promo_ID_Key_Concat2, item_barcode, consumer_item_nbr, asda_promo_type) AS min_rollback_start_dt
+                    , MAX(rollback_prod_end) OVER (PARTITION BY Promo_ID_Key_Concat2, item_barcode, consumer_item_nbr, asda_promo_type) AS max_rollback_start_dt
+                    , ROW_NUMBER() OVER (PARTITION BY Promo_ID_Key_Concat2, item_barcode, consumer_item_nbr, asda_promo_type ORDER BY MAX_COLLECTION_DATE DESC) AS RNKY
+                FROM MAIN_ESTATE_BASE WHERE ASDA_PROMO_TYPE = 'Rollback') a
+                WHERE RNKY = 1 """)
+
+        df_ME_ROLLBACK_PROMOS.createOrReplaceTempView("ME_ROLLBACK_PROMOS")
+
+        df_SM_ROLLBACK_PROMOS = spark.sql(""" SELECT
+                            Promo_ID_KEY_Concat_SM2
+                            , PRICING_STORE_FORMAT
+                            , consumer_item_nbr
+                            , item_barcode
+                            , Supermarket_Promo_Type
+                            , CASE WHEN Supermarket_Promo_Type = 'Rollback' THEN Promo_ID_KEY_Concat_SM2 else Promo_ID_Key_RBSM end as Promo_ID_Key_RBSM
+                            , min_rollback_start_dt as Rollback_prod_start_dt
+                            , max_rollback_start_dt as Rollback_prod_end_dt
+                            , Promo_ID_KEY_LSSM
+                            , Supermarket_Linksave_Desc
+                            , Supermarket_Linksave_prod_Start
+                            , Supermarket_Linksave_prod_End
+                            , Supermarket_Linksave_Promo_Strt_Dt
+                            , Supermarket_Linksave_Promo_End_Dt
+                            , Supermarket_Linksave_Qty_Trigger
+                            , Supermarket_Linksave_Total_Price_Fixed
+                            , Supermarket_Linksave_Unit_Price_Fixed
+                            , MIN_COLLECTION_DATE
+                            , MAX_collection_Date
+                        FROM (
+                        SELECT *
+                            , MIN(Supermarket_Rollback_prod_Start) OVER (PARTITION BY Promo_ID_KEY_Concat_SM2, item_barcode, consumer_item_nbr, supermarket_promo_type) AS min_rollback_start_dt
+                            , MAX(Supermarket_Rollback_prod_End) OVER (PARTITION BY Promo_ID_KEY_Concat_SM2, item_barcode, consumer_item_nbr, supermarket_promo_type) AS max_rollback_start_dt
+                            , ROW_NUMBER() OVER (PARTITION BY Promo_ID_KEY_Concat_SM2, item_barcode, consumer_item_nbr, supermarket_promo_type ORDER BY MAX_COLLECTION_DATE DESC) AS RNKY
+                        FROM SUPERMARKET_BASE WHERE supermarket_promo_type = 'Rollback')a
+                        WHERE RNKY = 1 """)
+
+        df_SM_ROLLBACK_PROMOS.createOrReplaceTempView("SM_ROLLBACK_PROMOS")
+
+        df_CV_ROLLBACK_PROMOS = spark.sql(""" SELECT
+                                                Promo_ID_Key_Concat_CV2
+                                                , PRICING_STORE_FORMAT
+                                                , consumer_item_nbr
+                                                , item_barcode
+                                                , Convenience_Promo_Type
+                        , CASE WHEN Convenience_Promo_Type = 'Rollback' THEN Promo_ID_KEY_Concat_CV2 else Promo_ID_Key_RBCV end as Promo_ID_Key_RBCV
+                        , min_rollback_start_dt as Rollback_prod_start_dt
+                                                , max_rollback_start_dt as Rollback_prod_end_dt
+                                                , Promo_ID_KEY_LSCV
+                                                , Convenience_Linksave_Desc
+                                                , Convenience_Linksave_prod_Start
+                                                , Convenience_Linksave_prod_End
+                                                , Convenience_Linksave_Promo_Strt_Dt
+                                                , Convenience_Linksave_Promo_End_Dt
+                                                , Convenience_Linksave_Qty_Trigger
+                                                , Convenience_Linksave_Total_Price_Fixed
+                                                , Convenience_Linksave_Unit_Price_Fixed
+                                                , MIN_COLLECTION_DATE
+                                                , MAX_collection_Date
+                                        FROM (
+                                        SELECT *
+                , MIN(Convenience_Rollback_prod_Start) OVER (PARTITION BY Promo_ID_KEY_Concat_CV2,item_barcode, consumer_item_nbr, convenience_promo_type) AS min_rollback_start_dt
+                        , MAX(Convenience_Rollback_prod_End) OVER (PARTITION BY Promo_ID_KEY_Concat_CV2, item_barcode, consumer_item_nbr, convenience_promo_type) AS max_rollback_start_dt
+                        , ROW_NUMBER() OVER (PARTITION BY Promo_ID_KEY_Concat_CV2,item_barcode, consumer_item_nbr, convenience_promo_type ORDER BY MAX_COLLECTION_DATE DESC) AS RNKY
+                                                FROM CONVENIENCE_BASE WHERE Convenience_Promo_Type = 'Rollback')a
+                                                WHERE RNKY = 1 """)
+
+        df_CV_ROLLBACK_PROMOS.createOrReplaceTempView("CV_ROLLBACK_PROMOS")
+
+        df_MEP_ROLLBACK_PROMO = spark.sql(""" SELECT
+                                                                                Promo_ID_Key_Concat2
+                                                                                , PRICING_STORE_FORMAT
+                                                                                , consumer_item_nbr
+                                                                                , Item_Barcode
+                                                                                , Asda_Promo_Type
+                                                                                , Rollback_prod_start_dt AS START_DT
+                                                                                , Rollback_prod_end_dt AS END_DT
+                                                                                , Linksave_Promo_Strt_Dt
+                                                                                , Linksave_Promo_End_Dt
+                                                                                , Asda_Linksave_Desc
+                                                                                , Linksave_Qty_Trigger
+                                                                                , Linksave_Unit_Price_Fixed
+                                                                                , Linksave_Total_Price_Fixed
+                                                                                , Promo_ID_Key_RB
+                                                                                , Promo_ID_KEY_LS
+                                                                                , MIN_COLLECTION_DATE
+                                                                                , MAX_collection_Date
+                                                                        FROM ME_ROLLBACK_PROMOS """)
+
+        df_MEP_ROLLBACK_PROMO.createOrReplaceTempView('MEP_ROLLBACK_PROMO')		
+		
+        df_MEP_LINKSAVE_PROMO = spark.sql(""" SELECT Promo_ID_Key_Concat2 AS PROMO_ID
+                                                                        , PRICING_STORE_FORMAT
+                                                                        , consumer_item_nbr
+                                                                        , item_barcode
+                                                                        , Asda_Promo_Type
+                                                                        , Linksave_prod_Start as START_DT
+                                                                        , Linksave_Prod_End as END_DT
+                                                                        , Linksave_Promo_Strt_Dt
+                                                                        , Linksave_Promo_End_Dt
+                                                                        , ASDA_linksave_desc
+                                                                        , Linksave_Qty_Trigger
+                                                                        , Linksave_Unit_Price_Fixed
+                                                                        , Linksave_Total_Price_Fixed
+                                                                        , Promo_ID_Key_RB
+                                                                        , Promo_ID_KEY_LS
+                                                                        ,MIN_COLLECTION_DATE
+                                                                        ,MAX_collection_Date
+                                                                FROM MAIN_ESTATE_BASE
+                                                                WHERE Asda_Promo_Type = 'Linksave' """)
+
+        df_MEP_LINKSAVE_PROMO.createOrReplaceTempView('MEP_LINKSAVE_PROMO')
+
+        df_MEP_LINKSAVE_AND_ROLLBACK_PROMO =spark.sql(""" SELECT
+                                                        Promo_ID_Key_Concat2 AS PROMO_ID
+                                                        , PRICING_STORE_FORMAT
+                                                        , consumer_item_nbr
+                                                        , item_barcode
+                                                        , Asda_Promo_Type
+                                                        , CASE WHEN Rollback_prod_Start >= Linksave_prod_Start THEN Rollback_prod_Start ELSE Linksave_prod_Start END as PROMO_START_DT
+                                                        , CASE WHEN Rollback_prod_end <= Linksave_Prod_End THEN Rollback_prod_end ELSE Linksave_Prod_End END as PROMO_END_DT
+                                                        , Linksave_Promo_Strt_Dt
+                                                        , Linksave_Promo_End_Dt
+                                                        , ASDA_linksave_desc
+                                                        , Linksave_Qty_Trigger
+                                                        , Linksave_Unit_Price_Fixed
+                                                        , Linksave_Total_Price_Fixed
+                                                        , Promo_ID_Key_RB
+                                                        , Promo_ID_KEY_LS
+                                                        , MIN_COLLECTION_DATE
+                                                        , MAX_collection_Date
+                                                FROM MAIN_ESTATE_BASE
+                                                WHERE Asda_Promo_Type = 'Linksave and Rollback' """)
+
+        df_MEP_LINKSAVE_AND_ROLLBACK_PROMO.createOrReplaceTempView('MEP_LINKSAVE_AND_ROLLBACK_PROMO')		
+		
+        df_MEP_OTHER_PROMO = spark.sql(""" SELECT
+                                                Promo_ID_Key_Concat2
+                                                , 'Main Estate' AS PRICING_STORE_FORMAT
+                                                , consumer_item_nbr
+                                                , Item_Barcode
+                                                , Asda_Promo_Type
+                                                , Promo_Start_Date as Start_dt
+                                                , Promo_End_Date as End_dt
+                                                , Linksave_Promo_Strt_Dt
+                                                , Linksave_Promo_End_Dt
+                                                , ASDA_linksave_desc
+                                                , Linksave_Qty_Trigger
+                                                , Linksave_Unit_Price_Fixed
+                                                , Linksave_Total_Price_Fixed
+                                                , Promo_ID_Key_RB
+                                                , Promo_ID_KEY_LS
+                                                , MIN(COLLECTION_DATE) as min_collection_date
+                                                , MAX(collection_Date) as max_collection_date
+                                        FROM Promo_Daily_Final_item_key
+                                        WHERE Asda_Promo_Type IN ('LPED', 'Markdown', 'New Asda Price Drop', 'Rollback Logic')
+                                        GROUP BY Promo_ID_Key_Concat2, Item_Barcode,consumer_item_nbr,  Asda_Promo_Type, Promo_Start_Date, Promo_End_Date, Linksave_Promo_Strt_Dt, Linksave_Promo_End_Dt
+                                        , ASDA_linksave_desc , Linksave_Qty_Trigger, Linksave_Unit_Price_Fixed, Linksave_Total_Price_Fixed, Promo_ID_Key_RB, Promo_ID_KEY_LS """)
+
+        df_MEP_OTHER_PROMO.createOrReplaceTempView('MEP_OTHER_PROMO')
+
+        df_MAIN_ESTATE_PROMOTIONS = spark.sql("""  SELECT * FROM MEP_ROLLBACK_PROMO
+                                                                UNION
+                                                SELECT * FROM MEP_LINKSAVE_PROMO
+                                                                UNION
+                                                SELECT * FROM MEP_LINKSAVE_AND_ROLLBACK_PROMO """)
+
+        df_MAIN_ESTATE_PROMOTIONS.createOrReplaceTempView("MAIN_ESTATE_PROMOTIONS")
+
+        df_SM_ROLLBACK_PROMO = spark.sql(""" SELECT
+                                                        Promo_ID_KEY_Concat_SM2
+                                                        , PRICING_STORE_FORMAT
+                                                        , consumer_item_nbr
+                                                        , Item_Barcode
+                                                        , Supermarket_Promo_Type
+                                                        , Rollback_prod_start_dt AS START_DT
+                                                        , Rollback_prod_end_dt AS END_DT
+                                                        , Supermarket_Linksave_Promo_Strt_Dt
+                                                        , Supermarket_Linksave_Promo_End_Dt
+                                                        , Supermarket_Linksave_Desc
+                                                        , Supermarket_Linksave_Qty_Trigger
+                                                        , Supermarket_Linksave_Unit_Price_Fixed
+                                                        , Supermarket_Linksave_Total_Price_Fixed
+                                                        , Promo_ID_Key_RBSM
+                                                        , Promo_ID_KEY_LSSM
+                                                        , MIN_COLLECTION_DATE
+                                                        , MAX_collection_Date
+                                                FROM SM_ROLLBACK_PROMOS """)
+
+        df_SM_ROLLBACK_PROMO.createOrReplaceTempView('SM_ROLLBACK_PROMO')	
+
+        df_SM_LINKSAVE_PROMO = spark.sql(""" SELECT
+                                                        Promo_ID_KEY_Concat_SM2 AS PROMO_ID
+                                                        , PRICING_STORE_FORMAT
+                                                        , consumer_item_nbr
+                                                        , item_barcode
+                                                        , Supermarket_Promo_Type
+                                                        , Supermarket_Linksave_prod_Start as START_DT
+                                                        , Supermarket_Linksave_prod_End as END_DT
+                                                        , Supermarket_Linksave_Promo_Strt_Dt
+                                                        , Supermarket_Linksave_Promo_End_Dt
+                                                        , Supermarket_Linksave_Desc
+                                                        , Supermarket_Linksave_Qty_Trigger
+                                                        , Supermarket_Linksave_Unit_Price_Fixed
+                                                        , Supermarket_Linksave_Total_Price_Fixed
+                                                        , Promo_ID_Key_RBSM
+                                                        , Promo_ID_KEY_LSSM
+                                                        , MIN_COLLECTION_DATE
+                                                        , MAX_collection_Date
+                                                FROM SUPERMARKET_BASE
+                                                WHERE Supermarket_Promo_Type = 'Linksave' """)
+
+        df_SM_LINKSAVE_PROMO.createOrReplaceTempView('SM_LINKSAVE_PROMO')
+
+        df_SM_LINKSAVE_AND_ROLLBACK_PROMO =spark.sql(""" SELECT
+                                                        Promo_ID_KEY_Concat_SM2 AS PROMO_ID
+                                                        , PRICING_STORE_FORMAT
+                                                        , consumer_item_nbr
+                                                        , item_barcode
+                                                        , Supermarket_Promo_Type
+                                                        , CASE WHEN Supermarket_Rollback_prod_Start >= Supermarket_Linksave_prod_Start THEN Supermarket_Rollback_prod_Start ELSE Supermarket_Linksave_prod_Start END as PROMO_START_DT
+                                                        , CASE WHEN Supermarket_Rollback_prod_end <= Supermarket_Linksave_Prod_End THEN Supermarket_Rollback_prod_end ELSE Supermarket_Linksave_Prod_End END as PROMO_END_DT
+                                                        , Supermarket_Linksave_Promo_Strt_Dt
+                                                        , Supermarket_Linksave_Promo_End_Dt
+                                                        , Supermarket_Linksave_Desc
+                                                        , Supermarket_Linksave_Qty_Trigger
+                                                        , Supermarket_Linksave_Unit_Price_Fixed
+                                                        , Supermarket_Linksave_Total_Price_Fixed
+                                                        , Promo_ID_KEY_RBSM
+                                                        , Promo_ID_KEY_LSSM
+                                                        , MIN_COLLECTION_DATE
+                                                        , MAX_collection_Date
+                                                FROM SUPERMARKET_BASE
+                                                WHERE Supermarket_Promo_Type = 'Linksave and Rollback' """)
+
+        df_SM_LINKSAVE_AND_ROLLBACK_PROMO.createOrReplaceTempView('SM_LINKSAVE_AND_ROLLBACK_PROMO')		
+		
+        df_SM_OTHER_PROMO = spark.sql(""" SELECT
+                                                        Promo_ID_Key_Concat2
+                                                        , 'Supermarket' AS PRICING_STORE_FORMAT
+                                                        , consumer_item_nbr
+                                                        , Item_Barcode
+                                                        , Asda_Promo_Type
+                                                        , Promo_Start_Date as Start_dt
+                                                        , Promo_End_Date as End_dt
+                                                        , Linksave_Promo_Strt_Dt
+                                                        , Linksave_Promo_End_Dt
+                                                        , ASDA_linksave_desc
+                                                        , Linksave_Qty_Trigger
+                                                        , Linksave_Unit_Price_Fixed
+                                                        , Linksave_Total_Price_Fixed
+                                                        , Promo_ID_Key_RB
+                                                        , Promo_ID_KEY_LS
+                                                        , MIN(collection_Date) as min_collection_date
+                                                        , MAX(collection_Date) as max_collection_date
+                                                FROM Promo_Daily_Final_item_key
+                                                WHERE Asda_Promo_Type IN ('LPED', 'Markdown', 'New Asda Price Drop', 'Rollback Logic')
+                                                GROUP BY Promo_ID_Key_Concat2, Item_Barcode,consumer_item_nbr, Asda_Promo_Type, Promo_Start_Date, Promo_End_Date, Linksave_Promo_Strt_Dt, Linksave_Promo_End_Dt
+                                                , ASDA_linksave_desc , Linksave_Qty_Trigger, Linksave_Unit_Price_Fixed, Linksave_Total_Price_Fixed, Promo_ID_Key_RB, Promo_ID_KEY_LS """)
+
+        df_SM_OTHER_PROMO.createOrReplaceTempView('SM_OTHER_PROMO')
+
+        df_SM_PROMOTIONS = spark.sql(""" SELECT * FROM SM_ROLLBACK_PROMO
+                                            UNION
+                                            SELECT * FROM SM_LINKSAVE_PROMO
+                                            UNION
+                                            SELECT * FROM SM_LINKSAVE_AND_ROLLBACK_PROMO""")
+
+        df_SM_PROMOTIONS.createOrReplaceTempView("SM_PROMOTIONS")
+
+        df_CV_ROLLBACK_PROMO = spark.sql(""" SELECT
+                                                Promo_ID_KEY_Concat_CV2
+                                                        , PRICING_STORE_FORMAT
+                                                        , consumer_item_nbr
+                                                        , Item_Barcode
+                                                        , Convenience_Promo_Type
+                                                        , Rollback_prod_start_dt AS START_DT
+                                                        , Rollback_prod_end_dt AS END_DT
+                                                        , Convenience_Linksave_Promo_Strt_Dt
+                                                        , Convenience_Linksave_Promo_End_Dt
+                                                        , Convenience_Linksave_Desc
+                                                        , Convenience_Linksave_Qty_Trigger
+                                                        , Convenience_Linksave_Unit_Price_Fixed
+                                                        , Convenience_Linksave_Total_Price_Fixed
+                                                        , Promo_ID_Key_RBCV
+                                                        , Promo_ID_KEY_LSCV
+                                                        , MIN_COLLECTION_DATE
+                                                        , MAX_collection_Date
+                                                FROM CV_ROLLBACK_PROMOS """)
+
+        df_CV_ROLLBACK_PROMO.createOrReplaceTempView('CV_ROLLBACK_PROMO')
+
+	    df_CV_LINKSAVE_PROMO = spark.sql(""" SELECT
+                                                        Promo_ID_KEY_Concat_CV2 AS PROMO_ID
+                                                        , PRICING_STORE_FORMAT
+                                                        , consumer_item_nbr
+                                                        , item_barcode
+                                                        , Convenience_Promo_Type
+                                                        , Convenience_Linksave_prod_Start as START_DT
+                                                        , Convenience_Linksave_prod_End as END_DT
+                                                        , Convenience_Linksave_Promo_Strt_Dt
+                                                        , Convenience_Linksave_Promo_End_Dt
+                                                        , Convenience_Linksave_Desc
+                                                        , Convenience_Linksave_Qty_Trigger
+                                                        , Convenience_Linksave_Unit_Price_Fixed
+                                                        , Convenience_Linksave_Total_Price_Fixed
+                                                        , Promo_ID_Key_RBCV
+                                                        , Promo_ID_KEY_LSCV
+                                                        , MIN_COLLECTION_DATE
+                                                        , MAX_collection_Date
+                                                FROM CONVENIENCE_BASE
+                                                WHERE Convenience_Promo_Type = 'Linksave' """)
+
+        df_CV_LINKSAVE_PROMO.createOrReplaceTempView('CV_LINKSAVE_PROMO')
+
+        df_CV_LINKSAVE_AND_ROLLBACK_PROMO =spark.sql(""" SELECT
+                                                        Promo_ID_KEY_Concat_CV2 AS PROMO_ID
+                                                        , PRICING_STORE_FORMAT
+                                                        , consumer_item_nbr
+                                                        , item_barcode
+                                                        , Convenience_Promo_Type
+, CASE WHEN Convenience_Rollback_prod_Start >= Convenience_Linksave_prod_Start THEN Convenience_Rollback_prod_Start ELSE Convenience_Linksave_prod_Start END as PROMO_START_DT
+, CASE WHEN Convenience_Rollback_prod_end <= Convenience_Linksave_Prod_End THEN Convenience_Rollback_prod_end ELSE Convenience_Linksave_Prod_End END as PROMO_END_DT
+                                                        , Convenience_Linksave_Promo_Strt_Dt
+                                                        , Convenience_Linksave_Promo_End_Dt
+                                                        , Convenience_Linksave_Desc
+                                                        , Convenience_Linksave_Qty_Trigger
+                                                        , Convenience_Linksave_Unit_Price_Fixed
+                                                        , Convenience_Linksave_Total_Price_Fixed
+                                                        , Promo_ID_KEY_RBCV
+                                                        , Promo_ID_KEY_LSCV
+                                                        , MIN_COLLECTION_DATE
+                                                        , MAX_collection_Date
+                                                FROM CONVENIENCE_BASE
+                                                WHERE Convenience_Promo_Type = 'Linksave and Rollback' """)
+
+        df_CV_LINKSAVE_AND_ROLLBACK_PROMO.createOrReplaceTempView('CV_LINKSAVE_AND_ROLLBACK_PROMO')
+
+        df_CV_OTHER_PROMO = spark.sql(""" SELECT
+                                                        Promo_ID_Key_Concat2, consumer_item_nbr
+                                                        , 'CONVENIENCE' AS PRICING_FORMAT_TYPE
+                                                        , Item_Barcode
+                                                        , Asda_Promo_Type
+                                                        , Promo_Start_Date as Start_dt
+                                                        , Promo_End_Date as End_dt
+                                                        , Linksave_Promo_Strt_Dt
+                                                        , Linksave_Promo_End_Dt
+                                                        , ASDA_linksave_desc
+                                                        , Linksave_Qty_Trigger
+                                                        , Linksave_Unit_Price_Fixed
+                                                        , Linksave_Total_Price_Fixed
+                                                        , Promo_ID_Key_RB
+                                                        , Promo_ID_KEY_LS
+                                                        , MIN(collection_Date) as min_collection_date
+                                                        , MAX(collection_Date) as max_collection_date
+                                                FROM Promo_Daily_Final_item_key
+                                                WHERE Asda_Promo_Type IN ('LPED', 'Markdown', 'New Asda Price Drop', 'Rollback Logic')
+                        GROUP BY Promo_ID_Key_Concat2, Item_Barcode, consumer_item_nbr, Asda_Promo_Type, Promo_Start_Date, Promo_End_Date
+                        , Linksave_Promo_Strt_Dt, Linksave_Promo_End_Dt
+                , ASDA_linksave_desc , Linksave_Qty_Trigger, Linksave_Unit_Price_Fixed, Linksave_Total_Price_Fixed, Promo_ID_Key_RB, Promo_ID_KEY_LS """)
+
+        df_CV_OTHER_PROMO.createOrReplaceTempView('CV_OTHER_PROMO')
+
+        df_CV_PROMOTIONS = spark.sql(""" SELECT * FROM CV_ROLLBACK_PROMO
+                                          UNION
+                                         SELECT * FROM CV_LINKSAVE_PROMO
+                                          UNION
+                                         SELECT * FROM CV_LINKSAVE_AND_ROLLBACK_PROMO""")
+
+        df_CV_PROMOTIONS.createOrReplaceTempView("CV_PROMOTIONS")
+
+        final_df = spark.sql(""" SELECT * FROM MAIN_ESTATE_PROMOTIONS
+                                    UNION
+                                    SELECT * FROM CV_PROMOTIONS
+                                    UNION
+                                    SELECT * FROM SM_PROMOTIONS """)
+
+        prod_df = spark.sql(""" Select upc_nbr, original_cin from {}.{} where original_cin IS NOT NULL """.format(self.rpt_db, self.prod))
+
+        final_df = final_df.join(prod_df, on=[final_df.Item_Barcode == prod_df.upc_nbr], how="INNER")
+
+		final_df = final_df.select(F.col("Promo_ID_Key_Concat2").alias("PROMO_ID")\
+                                    ,F.col("original_cin").alias("PRODUCT_ID") \
+                                    ,F.col("PRICING_STORE_FORMAT") \
+                                    ,F.col("Asda_Promo_Type").alias("ASDA_PROMO_TYPE")\
+                                    ,F.col("START_DT").alias("PROMO_START_DATE")\
+                                    ,F.col("END_DT").alias("PROMO_END_DATE")\
+                                    ,F.col("Linksave_Promo_Strt_Dt").alias("LINKSAVE_START_DATE")\
+                                    ,F.col("Linksave_Promo_End_Dt").alias("LINKSAVE_END_DATE")\
+                                    ,F.col("Asda_Linksave_Desc").alias("ASDA_LINKSAVE_DESC")\
+                                    ,F.col("Linksave_Total_Price_Fixed").alias("LINKSAVE_TOTAL_PRICE")\
+                                    ,F.col("Linksave_Qty_Trigger").alias("LINKSAVE_QTY_TRIGGER")\
+                                    ,F.col("Linksave_Unit_Price_Fixed").alias("LINKSAVE_UNIT_PRICE")\
+                                    ,F.col("Promo_ID_Key_RB").alias("PROMO_ID_RB")\
+                                    ,F.col("Promo_ID_KEY_LS").alias("PROMO_ID_LS")\
+                                    ,(F.col("MIN_COLLECTION_DATE").cast(DateType()))\
+                                    ,(F.col("MAX_COLLECTION_DATE").cast(DateType())))\
+                                   .distinct().repartition("PROMO_START_DATE")
+
+        spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+
+        final_df.write.partitionBy("PROMO_START_DATE").mode("overwrite").saveAsTable("{}.{}".format(self.rpt_db, self.target_table))
+
+        print("*****************END*********************************")
+
+ts = rpt_offers()
+ts.run()

@@ -1,0 +1,87 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+class customerBasket:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_customer_basket"]
+        self.target_table = 'cdd_odl_redesign_customer_basket' ## update to cdd_odl_customer_basket in final version ##
+
+        # Source Database
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+
+        # Src Tables
+        #self.uct = cnt["Customer_Staging_Mart"]["csm_tables"]["cdd_odl_ucid_mapping_latest"]
+        self.uct = 'cdd_odl_ucid_mapping_latest'
+        #self.trans_ids = cnt["Customer_Staging_Mart"] ["cdd_odl_tables"] ["cdd_odl_transaction_ids"]
+        self.trans_ids = 'cdd_odl_transaction_ids'
+
+    def run(self):
+  
+        # Ingest data from hive tables and store as df for later transformation and joins
+        uct_df = spark.sql("SELECT distinct source_system_id, source, version_date, customerid \
+                                                                        FROM {}.{}".format(self.information_db,self.uct))
+
+        uct_df = uct_df.repartition('version_date')
+
+        ti_df = spark.sql("SELECT basket_id, store_nbr, visit_dt, visit_nbr, channel_id, ghs_order_id, sng_cart_id, lead_xref, singl_profl_id \
+                                                        FROM {}.{} WHERE non_scan_visit_ind = '0'".format(self.information_db, self.trans_ids))
+
+        ti_df.repartition('visit_dt')
+
+        # split uct_df into source = 'sp' and source = 'store'
+        uct_sp_df = uct_df.filter(F.col('source') == ('sp')).select('source_system_id', 'customerid')
+        uct_store_df = uct_df.filter(F.col('source') == ('store')).select('source_system_id', 'customerid')
+
+        # Split ti_df into channel_id 1 AND channel_id 3 where SPID IS NULL / channel_id = 2 AND channel_id = 3 WHERE SPID IS NOT NULL   
+        ti_1_df = ti_df.filter((F.col('channel_id') == 1) |  \
+                                ((F.col('channel_id') == 3) & (F.col('singl_profl_id').isNull())) | \
+                                ((F.col('channel_id') == 2) & (F.col('singl_profl_id').isNull())))
+        ti_1_df = ti_1_df.repartition('visit_dt')
+        ti_23_df = ti_df.filter(((F.col('channel_id') == 2) & (F.col('singl_profl_id').isNotNull())) | \
+                                ((F.col('channel_id') == 3) & (F.col('singl_profl_id').isNotNull())))
+        ti_23_df = ti_23_df.repartition('visit_dt')
+
+        # CALL FUNCTIONS
+        cid_1_df = self.getCust1(ti_1_df, uct_store_df) 
+        cid_23_df = self.getCust2_3(ti_23_df, uct_sp_df) 
+        cb_df = self.getCustomerBasket(cid_1_df, cid_23_df) # merge results of two tables above 
+
+        # WRITE TO TABLE 
+        spark.conf.set("spark.sql.shuffle.partitions", 500)
+        cb_df.write.mode("overwrite").partitionBy('visit_dt').saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+    ## FUNCTIONS ##
+
+    @staticmethod
+    def getCust1 (ti_1_df, uct_store_df):
+
+        cid_1_df = ti_1_df.join(uct_store_df, on=[(ti_1_df.lead_xref == uct_store_df.source_system_id)], how = 'LEFT')
+        cid_1_df = cid_1_df.withColumn('unified_cust_id', F.col('customerid')).drop(cid_1_df.source_system_id)\
+        .select('unified_cust_id','basket_id', 'store_nbr','visit_dt','visit_nbr','channel_id','ghs_order_id', 'sng_cart_id')
+        cid_1_df = cid_1_df.repartition('visit_dt')
+        return (cid_1_df)
+
+    @staticmethod
+    def getCust2_3 (ti_23_df, uct_sp_df):
+
+        cid_23_df = ti_23_df.join(uct_sp_df, on=[(ti_23_df.singl_profl_id == uct_sp_df.source_system_id)], how='LEFT')
+        cid_23_df = cid_23_df.withColumn('unified_cust_id', F.col('customerid')).drop(cid_23_df.source_system_id)\
+        .select('unified_cust_id','basket_id', 'store_nbr','visit_dt','visit_nbr','channel_id','ghs_order_id', 'sng_cart_id')
+        cid_23_df = cid_23_df.repartition('visit_dt')
+        return(cid_23_df)
+
+    @staticmethod
+    def getCustomerBasket (cid_23_df, cid_1_df):
+
+        cb_df = cid_1_df.union(cid_23_df)\
+        .select('unified_cust_id','basket_id', 'store_nbr','visit_dt','visit_nbr','channel_id','ghs_order_id', 'sng_cart_id')
+        return (cb_df)
+
+ts = customerBasket()
+ts.run()

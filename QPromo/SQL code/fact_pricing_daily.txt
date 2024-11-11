@@ -1,0 +1,96 @@
+/* R.Peake 02/05/2023 */
+
+/****New feed from FTDW to Hadoop 
+script to update ConfigFileExtractor table in FTDW for 4  files :
+[DW_Merch].[dbo].[vwFact_Pricing_daily] > QPROMO_vwFact_Pricing_Daily_1.csv
+[DW_Merch].[dbo].[vwFact_Pricing_daily] > QPROMO_vwFact_Pricing_Daily_2.csv
+[DW_Merch].[dbo].[vwFact_Pricing_daily] > QPROMO_vwFact_Pricing_Daily_3.csv
+[DW_Merch].[dbo].[vwFact_Pricing_daily] > QPROMO_vwFact_Pricing_Daily_4.csv
+[DW_Merch].[dbo].[vwFact_Pricing_daily] > QPROMO_vwFact_Pricing_Daily_5.csv
+[DW_Merch].[dbo].[vwFact_Pricing_daily] > QPROMO_vwFact_Pricing_Daily_6.csv
+
+
+	
+-----*1.csv----------------------------
+
+
+--1. Check to see if entry already exists
+IF EXISTS
+(
+	SELECT * 
+	FROM [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+	WHERE [FileName] = 'QPROMO_vwFact_Pricing_Daily_1.csv'
+)
+
+	BEGIN 
+		DELETE FROM [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+		WHERE [FileName] = 'QPROMO_vwFact_Pricing_Daily_1.csv'
+END;
+
+--2. Insert values
+INSERT INTO [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+			([FolderDestination] ,[FileName] ,[AppendDateToFileName] ,[SourceDB] ,[SQLQry]  ,[Push_LastComplete_DT]
+			,[LDM_StgToProdID_Dependency] ,[StartTime]  ,[BCPTimeoutOverrideSecs] ,[ExtractEnabled]
+			,[ColumnDelimiter]  ,[DMExtractor_Dependency]  ,[Frequency] ,[WeeklyDayOfWeek]
+			,[BCPCodePage]  ,[BCPRowTerminator]  ,[ZipFile]  ,[ZipFileProcessPath])
+
+values      ('\\ftdw\landingzone\Prod\LDM_Exports\CustomerEcoSystem\QPROMO' ,'QPROMO_vwFact_Pricing_Daily_1.csv'
+			,0    ,'DW_Merch'
+			,'SELECT * FROM [DW_MERCH].[dbo].[vwFact_Pricing_Daily] where [comp_key] in (27) and [Trad_Area_Key] not in(6,7)
+				and [Collection_Date] BETWEEN  (try_convert(date, (GETDATE()- 1096), 103)) AND (try_convert(date, (GETDATE() - 915), 103))'
+			,NULL   ,NULL ,'08:45:00.000'  ,3600,   1  ,'|'  ,NULL  ,NULL  ,NULL  ,'-C "28591"' ,'\n'  ,NULL ,NULL)
+;		 
+
+
+
+-----*2.csv----------
+
+--3. Check to see if entry already exists
+IF EXISTS
+(
+	SELECT * 
+	FROM [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+	WHERE [FileName] = 'QPROMO_vwFact_Pricing_Daily_2.csv'
+)
+
+	BEGIN 
+		DELETE FROM [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+		WHERE [FileName] = 'QPROMO_vwFact_Pricing_Daily_2.csv'
+END;
+
+--4. Insert values
+INSERT INTO [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+			([FolderDestination] ,[FileName] ,[AppendDateToFileName] ,[SourceDB] ,[SQLQry]  ,[Push_LastComplete_DT]
+			,[LDM_StgToProdID_Dependency] ,[StartTime]  ,[BCPTimeoutOverrideSecs] ,[ExtractEnabled]
+			,[ColumnDelimiter]  ,[DMExtractor_Dependency]  ,[Frequency] ,[WeeklyDayOfWeek]
+			,[BCPCodePage]  ,[BCPRowTerminator]  ,[ZipFile]  ,[ZipFileProcessPath])
+
+values      ('\\ftdw\landingzone\Prod\LDM_Exports\CustomerEcoSystem\QPROMO' ,'QPROMO_vwFact_Pricing_Daily_2.csv'
+			,0    ,'DW_Merch'
+			,'SELECT * FROM [DW_MERCH].[dbo].[vwFact_Pricing_Daily] where [comp_key] in (27) and [Trad_Area_Key] not in(6,7)
+				and [Collection_Date] BETWEEN  (try_convert(date, (GETDATE()- 914), 103)) AND (try_convert(date, (GETDATE() - 732), 103))'
+			,NULL   ,NULL ,'08:45:00.000'  ,3600,   1  ,'|'  ,NULL  ,NULL  ,NULL  ,'-C "28591"' ,'\n'  ,NULL ,NULL)
+;	
+
+------2022-----------
+
+update [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+set SQLQry = 'SELECT * FROM [DW_MERCH].[dbo].[vwFact_Pricing_Daily] where Collection_Date BETWEEN ''2022-01-01'' AND ''2022-12-31''  '
+where FileName = 'QPROMO_vwFact_Pricing_daily_2022.csv'
+;
+		 
+
+update [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+set Push_LastComplete_DT = NULL 
+where FileName = 'QPROMO_vwFact_Pricing_daily_2022.csv'
+
+----2023------------
+
+update [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+set SQLQry = 'SELECT * FROM [DW_MERCH].[dbo].[vwFact_Pricing_Daily] where Collection_Date BETWEEN ''2023-01-01'' AND ''2023-12-31''  '
+where FileName = 'QPROMO_vwFact_Pricing_daily_2023.csv'
+;
+
+update [FTDW_MetaConfig].[dbo].[ConfigFileExtractor]
+set Push_LastComplete_DT = NULL 
+where FileName = 'QPROMO_vwFact_Pricing_daily_2023.csv'

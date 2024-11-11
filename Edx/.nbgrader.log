@@ -1,0 +1,32 @@
+[NotebookApp | WARNING] No nbgrader_config.py file found (rerun with --debug to see where nbgrader is looking)
+[NotebookApp | INFO] Loading the validate_assignment nbgrader serverextension
+[NotebookApp | INFO] Serving notebooks from local directory: /home/ucsddse230/work
+[NotebookApp | INFO] 0 active kernels
+[NotebookApp | INFO] The Jupyter Notebook is running at:
+[NotebookApp | INFO] http://[all ip addresses on your system]:8888/
+[NotebookApp | INFO] Use Control-C to stop this server and shut down all kernels (twice to skip confirmation).
+[NotebookApp | INFO] 302 GET / (172.17.0.1) 0.92ms
+[NotebookApp | INFO] Writing notebook-signing key to /home/ucsddse230/.local/share/jupyter/notebook_secret
+[NotebookApp | WARNING] Notebook Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb is not trusted
+[NotebookApp | INFO] Kernel started: 766c0c48-0c1b-4343-a036-35703d1647a4
+[NotebookApp | INFO] 302 GET /notebooks/Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/Figures/Row-major-layout.png (172.17.0.1) 25.73ms
+[NotebookApp | WARNING] 404 GET /static/components/bootstrap/js/tooltip.js?v=20220117130809 (172.17.0.1) 28.56ms referer=http://localhost:8889/notebooks/Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb
+[NotebookApp | WARNING] Timeout waiting for kernel_info reply from 766c0c48-0c1b-4343-a036-35703d1647a4
+[NotebookApp | INFO] Adapting to protocol v5.1 for kernel 766c0c48-0c1b-4343-a036-35703d1647a4
+[NotebookApp | INFO] Saving file at /Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb
+[NotebookApp | WARNING] Notebook Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb is not trusted
+[NotebookApp | INFO] Saving file at /Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb
+[NotebookApp | WARNING] Notebook Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb is not trusted
+[NotebookApp | INFO] Starting buffering for 766c0c48-0c1b-4343-a036-35703d1647a4:b490a883d00a45c1875303941ec41a66
+[NotebookApp | WARNING] Notebook Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb is not trusted
+[NotebookApp | INFO] 302 GET /notebooks/Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/Figures/Row-major-layout.png (172.17.0.1) 37.35ms
+[NotebookApp | WARNING] 404 GET /static/components/bootstrap/js/tooltip.js?v=20220117130809 (172.17.0.1) 3.60ms referer=http://localhost:8889/notebooks/Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb
+[NotebookApp | INFO] Saving file at /Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb
+[NotebookApp | WARNING] Notebook Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb is not trusted
+[NotebookApp | INFO] Starting buffering for 766c0c48-0c1b-4343-a036-35703d1647a4:be5345746ea540f1831a7c2c7d624e82
+[NotebookApp | WARNING] Notebook Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb is not trusted
+[NotebookApp | INFO] 302 GET /notebooks/Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/Figures/Row-major-layout.png (172.17.0.1) 35.97ms
+[NotebookApp | WARNING] 404 GET /static/components/bootstrap/js/tooltip.js?v=20220117130809 (172.17.0.1) 2.73ms referer=http://localhost:8889/notebooks/Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb
+[NotebookApp | INFO] Saving file at /Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb
+[NotebookApp | WARNING] Notebook Section1Notebooks/Section1-Spark-Basics/0.MemoryLatency/1_Row_vs_Col_Major.ipynb is not trusted
+[NotebookApp | INFO] Starting buffering for 766c0c48-0c1b-4343-a036-35703d1647a4:13c20fb05ff842f6bca9c93392add660

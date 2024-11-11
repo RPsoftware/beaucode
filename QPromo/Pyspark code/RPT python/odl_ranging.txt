@@ -1,0 +1,67 @@
+     df_cal_raw = spark.sql(
+            '''SELECT day_date,asda_wk_nbr FROM {}.{}'''.format(self.calendar_db, self.calendar_table))
+
+        df_cal_raw.createOrReplaceTempView("dim_Calendar")
+
+        df_cal_cur_wk = spark.sql(
+            '''SELECT asda_wk_nbr FROM {}.{} where day_date = current_date()'''.format(self.calendar_db,
+                                                                                       self.calendar_table))
+        df_cal_cur_wk.createOrReplaceTempView("cur_week")
+
+        df_min_max_date = spark.sql(''' select dc.asda_wk_nbr as asda_wk_nbr,
+                                               min(day_date) as week_start_date,
+                                               max(day_date) as week_end_date
+                                        from dim_Calendar dc
+                                        join cur_week cw
+                                        on dc.asda_wk_nbr = cw.asda_wk_nbr
+                                        group by dc.asda_wk_nbr ''')
+
+        df_min_max_date.createOrReplaceTempView("date_range")
+
+        df_ranging_dl = spark.sql(''' select
+                                      dl.mds_fam_id,
+                                      coalesce(di.cons_item_nbr,0) as cons_item_nbr,
+                                      dl.store_nbr,
+                                      di.original_cin,
+                                      dl.traited,
+                                      dl.asda_wk_number
+                                      from
+                                            (select it.mds_fam_id as mds_fam_id,
+                                                        ts.store_nbr as store_nbr,
+                                                        'Y' as traited,
+                                                        dc.asda_wk_nbr as asda_wk_number
+                                             from
+                                             gb_customer_data_domain_raw.cdd_raw_mdse_item_trait it
+                                             join gb_customer_data_domain_raw.cdd_raw_mdse_trait_store ts
+                                             on it.trait_nbr = ts.trait_nbr
+                                             join date_range dc
+                                             on cast(current_date() as date) <= dc.week_end_date
+                                             where (it.rec_status_ind='Y' or (it.rec_status_ind='N' and date_sub(cast(it.rec_eff_end_dt as date),1) >= dc.week_start_date)) and (ts.rec_status_ind='Y' or (ts.rec_status_ind='N' and date_sub(cast(ts.rec_eff_end_dt as date),1) >= dc.week_start_date))) dl
+                                      left join gb_customer_data_domain_odl.cdd_odl_dim_item_hierarchy di
+                                      on dl.mds_fam_id = di.mds_fam_id ''')
+
+        table_list = sqlContext.tableNames(self.target_db)
+
+        if self.target_table in table_list:
+            df_ranging = spark.sql(
+                'SELECT mds_fam_id,cons_item_nbr,store_nbr,original_cin,asda_wk_number FROM {}.{}'.format(
+                    self.target_db, self.target_table))
+
+            df_new_ranging = df_ranging_dl.join(df_ranging, (df_ranging.mds_fam_id == df_ranging_dl.mds_fam_id) & (
+                    df_ranging.cons_item_nbr == df_ranging_dl.cons_item_nbr) & (
+                                                        df_ranging.store_nbr == df_ranging_dl.store_nbr) & (
+                                                        df_ranging.original_cin == df_ranging_dl.original_cin) & (
+                                                        df_ranging.asda_wk_number == df_ranging_dl.asda_wk_number),
+                                                how='LEFT_ANTI')
+            df_new_ranging.write.insertInto(self.target_db + '.' + self.target_table, overwrite=False)
+        else:
+            df_full_ranging = spark.sql('''SELECT rg.ITEM_NBR as mds_fam_id,
+                                                  coalesce(di.cons_item_nbr,0) as cons_item_nbr,
+                                                  rg.STORE_NBR as store_nbr,
+                                                  di.original_cin,
+                                                  'Y' as traited,
+                                                  rg.asdaweeknbr as asda_wk_number
+                                                  FROM
+                                                  gb_customer_data_domain_raw.cdd_raw_Ranging_FT rg
+                                                  left join gb_customer_data_domain_odl.cdd_odl_dim_item_hierarchy di
+                                                  on rg.ITEM_NBR = di.mds_fam_id ''')

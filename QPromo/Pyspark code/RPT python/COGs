@@ -1,0 +1,68 @@
+from cip.cip.framework.connections.spark import spark
+import datetime
+import subprocess
+import pyspark.sql.functions as F
+
+class rpt_COGs:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+
+        #TARGET TABLE
+        self.rpt_db = 'gb_customer_data_domain_rpt'
+        self.target_table = 'cdd_rpt_qpromo_cogs_uatRP'
+
+        #SOURCE TABLES
+        self.raw_db = 'gb_customer_data_domain_raw'
+		self.odl_db = 'gb_customer_data_domain_odl'
+		
+        self.pos = 'cdd_raw_sku_dly_pos_unpivot_adj'
+        self.dih = 'cdd_odl_dim_item_hierarchy'
+        self.ti = 'cdd_rpt_transaction_item'
+
+    def run(self):
+
+        print("************** SPARK JOB Initiated****************")
+		
+		min_date = '2023-02-22'
+		max_date = '2023-05-22'
+	
+		df1 = spark.sql(""" select it.original_cin, sdp.gregorian_date as sale_date,
+								sdp.store_nbr as store_nbr,
+								sdp.item_nbr as item_nbr,
+								sdp.sell_price as sell_price,
+								CAST((it.vnpk_cost_amt / CAST(it.vnpk_qty AS DECIMAL(18,4))) AS DECIMAL(9,2)) AS unit_cost_price,
+								qty AS units_sold,
+								sdp.QTY * CAST((it.vnpk_cost_amt / CAST(it.vnpk_qty AS DECIMAL(18,4))) AS DECIMAL(9,2)) AS sale_retail_cost_amount
+								from {}.{} sdp 
+								inner join {}.{} it 
+								on sdp.item_nbr = it.mds_fam_id 
+								WHERE (dept_nbr IN ( 48, 50, 51 ) AND it.vnpk_wt_fmt_cd <> 'V')
+								OR it.dept_nbr NOT IN ( 48, 50, 51 ) """.format(self.raw_db, self.pos, self.odl_db, self.dih)).repartition("store_nbr")
+					
+		df2 = spark.sql(""" SELECT original_cin,visit_dt, sale_amt_exc_vat, store_nbr from {}.{} WHERE visit_dt BETWEEN '{}' AND '{}' """.format(self.rpt_db, self.ti, min_date, max_date)).repartition("store_nbr")
+			
+		df3 = df2.join(df1, on=[(df2.original_cin == df1.original_cin) & (df2.visit_dt == df1.sale_date)], how='INNER').drop(df2.store_nbr).drop(df2.original_cin).drop(df1.original_cin).repartition("store_nbr")
+		
+		df4 = df3.groupBy(df3.sale_date, df3.store_nbr, df3.item_nbr, df3.sell_price, df3.unit_cost_price)\
+						.agg(F.sum('units_sold').alias('units_sold'), F.sum('sale_amt_exc_vat').alias('sales_amount_excluding_vat'), F.sum('sale_retail_cost_amount').alias('sale_retail_cost_amount')\
+						.select(F.col('sale_date')\
+								,F.col('store_nbr')\
+								,F.col('item_nbr')\
+								,F.col('sell_price')\
+								,F.col('unit_cost_price')\
+								,F.col('units_sold')\
+								,F.col('sales_amount_excluding_vat')\
+								,F.col('sale_retail_cost_amount'))
+        df4 = df4.distinct()
+		spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+        
+        df4.write.partitionBy("store_nbr").mode("overwrite").saveAsTable("{}.{}".format(self.rpt_db, self.target_table))
+
+        print("*****************END*********************************")
+
+ts = rpt_COGs()
+ts.run()

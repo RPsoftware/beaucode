@@ -1,0 +1,25 @@
+from cip.cip.framework.connections.spark import spark
+from pyspark.sql.types import StructType, StructField, LongType, StringType, DateType
+import pyspark.sql.functions as F
+
+class extractFile:
+    def __init__(self):
+        self.source_db = 'gb_customer_data_domain_rpt'
+        self.source_table = 'cdd_rpt_anaplan'
+        
+        self.column_list = 'masterpromoname as master_promo_name, promo_period_start_date as start_date, promo_period_end_date as end_date, promo_feature_location as feature_location, store_nbr,original_cin as product_id'
+
+   
+        self.file_path = 'hdfs://ukprod1ha/user/svc_uk_cust_rdl/extracts/qpromo'
+
+    def run(self):
+        print('********START*****************')
+
+        extract_df = spark.sql("SELECT {} FROM {}.{}".format(self.column_list, self.source_db, self.source_table))
+        extract_df.write.mode('overwrite').parquet(self.file_path + '/anaplan_20230629.parquet/')
+
+        print('********END*****************')
+
+ts = extractFile()
+ts.run()
+~                                                                                                                                                                                                     ~             

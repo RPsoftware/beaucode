@@ -1,0 +1,31 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+class rptCustBasket:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_rpt_database"]["extraction_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_rpt_tables"]["cdd_rpt_customer_basket"] #eventually
+        self.target_table = 'cdd_rpt_redesign_customer_basket'
+
+        # Source Databases
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+
+        # Src Tables
+        #self.cb = cnt["Customer_Staging_Mart"] ["cdd_odl_tables"] ["cdd_odl_customer_basket"] #eventually
+        self.cb = 'cdd_odl_redesign_customer_basket'
+
+
+    def run(self):
+
+        cb_df = spark.sql("SELECT unified_cust_id, basket_id, visit_dt FROM {}.{}".format(self.information_db, self.cb))
+		cb_df.repartition('visit_dt')
+		
+		cb_df.write.mode('overwrite').partitionBy('visit_dt').saveAsTable("{}.{}".format(self.target_db, self.target_table))
+														
+ts = rptCustBasket()
+ts.run()

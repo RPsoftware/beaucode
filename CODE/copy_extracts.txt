@@ -1,0 +1,194 @@
+import yaml
+import os
+from cip.cip.framework.connections.spark import spark
+from pyspark.sql.types import StructType, StructField, LongType, StringType, DateType
+from pyspark.sql import HiveContext, SparkSession
+from pyspark import SparkFiles
+import pyspark.sql.functions as F
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
+from Crypto.Util.Padding import unpad
+import base64
+from cip.cip.framework.files.read import cnt
+from cip.cip.framework.files.read import encrypt_key
+from cip.cip.framework.logging.outboundLogging import aa
+
+import argparse
+
+from cip.cip.framework.encryption.encryption import encryption as e
+
+
+class extractParquet:
+
+    def run(self, extract, extractType='FULL', date_column='', extractDays=0):
+        print("*****************Extraction Start******************")
+        # Get Extract Path
+
+        schema = self.metadataSchema()
+        # metadata = self.metadata(schema)
+        metadata = spark.read.format("csv").schema(schema).option("header", "true").option("delimiter", '|').load('hdfs://ukprod1ha/user/svc_uk_cust_rdl/customer_metadata.txt')
+	metadata_filter = metadata.where(metadata.Extract == extract)
+
+        source_db = self.getDB(metadata_filter)
+        print(source_db)
+        source_table = self.getTable(metadata_filter)
+        print(source_table)
+
+        full_extract_path = self.filePath(metadata_filter, cnt, extract)
+
+        column_list = self.getColumnList(metadata_filter)
+        print(column_list)
+
+        encrypt_column_list = self.getEncryptionColumnList(metadata_filter)
+
+        if extractType == 'DELTA':
+            extract_df = self.getDeltaData(source_db, source_table, column_list, date_column, extractDays)
+        else:
+            extract_df = self.getData(source_db, source_table, column_list)
+
+        # Anonymization trigger
+        # Check if any columns in metadata has masking column enabled.
+        # Initiate only if any of the column has ExtractHashing set to Y.
+
+        encryption_column_count = metadata_filter.where(metadata_filter.ExtractHashing == 'Y').count()
+
+        if encryption_column_count >= 1:
+            final_extract_df = self.anonymization(extract_df, encrypt_column_list)
+        else:
+            final_extract_df = extract_df
+
+        self.generateOutput(final_extract_df, full_extract_path)
+
+        aa.run(extract)
+
+        print("*****************Extraction Complete******************")
+
+    # @staticmethod
+    # def read_config():
+    #     # Parameterize the path
+    #     spark.sparkContext.addFile('hdfs://ukprod1ha/user/svc_uk_cust_rdl/config.yaml')
+    #     with open(SparkFiles.get('config.yaml'), "r") as file:
+    #         context = yaml.load(file, Loader=yaml.SafeLoader)
+    #     return context
+
+    @staticmethod
+    def filePath(metadata, context, extract):
+        filename_df = metadata.select(F.col('ExtractFilename')).distinct()
+        if filename_df.count() == 1:
+            extract_name = str(filename_df.collect()[0][0])
+        extract_path = str(context["extract_path"]["Quantium"]["output"])
+        root_path = str(context["run_path"]["root_path"])
+
+        full_path = root_path + extract_path + extract_name
+
+        return full_path
+
+    @staticmethod
+    def getDB(metadata):
+        database_df = metadata.select(F.col('ExtractDB')).distinct()
+        if database_df.count() == 1:
+            source_db = database_df.collect()[0][0]
+            return source_db
+
+    @staticmethod
+    def getTable(metadata):
+        table_df = metadata.select(F.col('ExtractTable')).distinct()
+        if table_df.count() == 1:
+            source_table = table_df.collect()[0][0]
+            return source_table
+
+     @staticmethod
+     def metadataSchema():
+         metadata_schema = StructType([
+             StructField("Extract", StringType(), True),
+             StructField("ExtractFilename", StringType(), True),
+             StructField("ExtractDB", StringType(), True),
+             StructField("ExtractTable", StringType(), True),
+             StructField("ExtractColumn", StringType(), True),
+             StructField("ExtractSeq", LongType(), True),
+             StructField("ExtractPartition", StringType(), True),
+             StructField("ExtractHashing", StringType(), True),
+         ])
+    
+
+         return metadata_schema
+
+    @staticmethod
+    def getColumnList(metadata):
+        # column_df = metadata.select(F.col('ExtractColumn'), F.col('ExtractSeq')).orderBy('ExtractSeq')
+        # c_list = column_df.select(F.col('ExtractColumn')).rdd.map(lambda row: row[0]).collect()
+        column_df = metadata.select(
+            F.concat(metadata.ExtractColumn, F.lit(" AS "), metadata.FinalColumn).alias('Final_Extract_Column'),
+            F.col('ExtractSeq')).orderBy('ExtractSeq')
+        c_list = column_df.select(F.col('Final_Extract_Column')).rdd.map(lambda row: row[0]).collect()
+        c_list = map(str, c_list)
+        column_list = ','.join(c_list)
+        return column_list
+
+    @staticmethod
+    def getEncryptionColumnList(metadata):
+        column_df = metadata.where(metadata.ExtractHashing == 'Y').select(F.col('FinalColumn'),
+                                                                          F.col('ExtractSeq')).orderBy('ExtractSeq')
+        c_list = column_df.select(F.col('FinalColumn')).rdd.map(lambda row: row[0]).collect()
+        return c_list
+
+    # @staticmethod
+    # def metadata(schema):
+    #     metadata_df = spark.read.format("csv").schema(schema).option("header", "true").option("delimiter", '|').load(
+    #         'hdfs://ukprod1ha/user/svc_uk_cust_rdl/metadata.txt')
+    #     return metadata_df
+
+    def getDeltaData(self, source_db, source_table, column_list, date_column, extractDays):
+        extract_df = spark.sql(
+            "SELECT {} FROM {}.{} where {} >= date_add(current_date(),-{})".format(column_list,
+                                                                                                          source_db,
+                                                                                                          source_table,
+                                                                                                          date_column,
+                                                                                                          extractDays))
+        return extract_df
+
+    def getData(self, source_db, source_table, column_list):
+        extract_df = spark.sql("SELECT {} FROM {}.{}".format(column_list, source_db, source_table))
+        return extract_df
+
+    def generateOutput(self, extract_df, full_extract_path):
+        extract_df.write.mode('overwrite').parquet(full_extract_path)
+
+    def anonymization(self, extract_df, encrypt_column_list):
+        print("****************START Anonymization**************")
+
+        def encrypt_val(text, key):
+            cipher = AES.new(bytes(key.decode('ascii')), AES.MODE_ECB)
+            cipher_text = cipher.encrypt(pad(str(text).encode("ascii"), AES.block_size))
+            textBase64 = base64.b64encode(cipher_text)
+            textBase64P = textBase64.decode('UTF-8')
+            return str(textBase64P)
+
+        encrypt = F.udf(encrypt_val, StringType())
+
+        # encrypt_key = spark.sparkContext.textFile("hdfs://ukprod1ha//user/svc_uk_cust_rdl/fook.txt").collect()[0]
+        # encrypt_key = mGZK18DxtKgK_yBr=
+        for x in encrypt_column_list:
+            extract_df = extract_df.withColumn(x, encrypt(str(x), F.lit(encrypt_key.encode('ascii'))))
+
+        return extract_df
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Extract Name")
+    parser.add_argument('--extract', '-e', dest='extract_table', required=True, help='Extract from RPT to parquet')
+    parser.add_argument('--type', '-t', dest='extract_type', required=False, help='DELTA if DELTA EXTRACTS')
+    parser.add_argument('--dateColumn', '-d', dest='date_column', required=False, help='filter data column')
+    parser.add_argument('--noOfDays', '-n', dest='extractDays', required=False, help='number of days')
+    args = parser.parse_args()
+
+    extract = args.extract_table
+    extractType = args.extract_type
+    date_column = args.date_column
+    extractDays = args.extractDays
+
+    ts = extractParquet()
+    if extractType == 'DELTA':
+        ts.run(extract, extractType, date_column, extractDays)
+    else:
+        ts.run(extract)

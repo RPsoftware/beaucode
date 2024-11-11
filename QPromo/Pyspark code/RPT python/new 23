@@ -1,0 +1,55 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+
+import subprocess
+import datetime
+from cip.cip.framework.files.generic_processes import purge_data,archive_file
+
+class delta:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        today = datetime.datetime.today()
+        today = today.strftime('%Y%m%d')
+        self.target_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.target_table = cnt["Customer_Staging_Mart"]["csm_tables"]["fact_store_transaction"]
+        self.path = str(cnt["run_path"]["root_path"]) + str(cnt["file_path"]["FTDW"]["store_transaction"])
+        self.archive_path = str(cnt["run_path"]["archive_path"]) +'/'+str(today) +str(cnt["file_path"]["FTDW"]["store_transaction"])
+        self.target_partition_clm = cnt["partition"]["store_transaction"]["partition_column"]
+        self.target_partition_val = cnt["partition"]["store_transaction"]["partition_value"]
+
+
+    def run(self):
+        print("************** SPARK JOB Inititated****************")
+
+        source_df = spark.read.format("csv").\
+                    schema(schema).\
+                    option("header", "false").\
+                    option("delimiter",'|').\
+                    option("inferSchema", "true").\
+                    load(self.path)
+
+        spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+
+        source_df.select("tc_nbr","visit_nbr","store_nbr","receipt_seq_nbr","ldm_dt_lastload","visit_date").\
+            write.mode("overwrite").insertInto("{}.{}".format(self.target_db, self.target_table), overwrite=True)
+
+        """ this commented code was for 1st time full load
+        source_df.write.partitionBy("visit_date").mode("overwrite").saveAsTable(
+            "{}.{}".format(self.target_db, self.target_table))
+        """
+		
+        # archive source file once processed
+        #archive_file(self.path, self.archive_path)
+
+        # purge data more than configured days (1093)
+        #purge_data(self.target_db, self.target_table, self.target_partition_clm, self.target_partition_val)
+
+        print("************** SPARK JOB complete****************")
+
+ts = delta()
+ts.run()

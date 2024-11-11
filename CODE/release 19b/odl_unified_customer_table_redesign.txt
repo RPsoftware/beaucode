@@ -1,0 +1,111 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+class customerInform:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.target_table = "cdd_odl_redesign_unified_customer"
+        self.singl_profl_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["secured_information_database"]
+        self.singl_profl_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_singl_profl_customer"]
+        self.staging_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.secured_staging_db = cnt["Customer_Staging_Mart"]["csm_database"]["secured_landing_database"]
+        self.unified_customer_table = cnt["Customer_Staging_Mart"]["csm_tables"]["dim_csm_unified_customer_table"]
+        self.cust_ucid_table = cnt["Customer_Staging_Mart"]["csm_tables"]["dim_cust_ucid"]
+        self.store_visit_ucid_table = cnt["Customer_Staging_Mart"]["csm_tables"]["fact_store_visit_ucid"]
+        #self.cip_activity_table = cnt["Customer_Staging_Mart"]["csm_tables"]["cdd_raw_cip_cust_activity"]
+        self.cip_activity_table = "cdd_raw_cip_cust_activity"
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.transaction_ids_table = "cdd_odl_transaction_ids"
+        self.ucid_latest = "cdd_odl_ucid_mapping_latest"
+        
+
+    def run(self):
+        print("****************Execution Start****************")
+
+        df_singl_profl_table = spark.sql(
+            'SELECT * fROM {}.{}'.format(self.singl_profl_db, self.singl_profl_table))
+        df_singl_profl_table.createOrReplaceTempView('singl_profl_view')
+
+        df_unified_customer_version = spark.sql(
+            "SELECT * fROM {}.{}".format(self.information_db, self.ucid_latest))
+        df_unified_customer_version = df_unified_customer_version.select(F.col('customerid'), \
+                                                                        F.col('version')).distinct()
+        df_unified_customer_version.createOrReplaceTempView('unified_customer_view')
+
+        df_unified_customer_source = spark.sql(
+            "SELECT * fROM {}.{} WHERE source = 'store'".format(self.information_db, self.ucid_latest))
+        df_unified_customer_source = df_unified_customer_source.select(F.col('customerid'), \
+                                                                       F.col('source_system_id')).distinct()
+
+        #fetching registration channel based on earliest registration date
+        df_reg = spark.sql('''select unified_cust_id, registration_channel
+                      from
+                        (select unified_cust_id , registration_channel
+                        , ROW_NUMBER() over (partition by unified_cust_id order by registration_date desc) rn
+                            from singl_profl_view
+                            ) reg_channel
+                            where rn = 1 and registration_channel is not null''')
+        df_reg.createOrReplaceTempView('reg_view')
+
+        df_cust_ucid = spark.sql('''Select     unified_cust_id
+                                               ,singl_profl_id
+                                               ,src_create_ts
+                                                from
+                                                    (SELECT  unified_cust_id
+                                                            ,singl_profl_id
+                                                            ,src_create_ts
+                                                            ,row_number() over (partition by unified_cust_id order by src_create_ts desc)rn
+                                                    FROM {}.{}
+                                                    )cust_ucid
+                                                where rn=1 '''.format(self.secured_staging_db, self.cust_ucid_table))
+        df_cust_ucid.createOrReplaceTempView('cust_ucid_view')
+
+        df_trans_ids = spark.sql('SELECT lead_xref fROM {}.{} WHERE channel_id = 1'.format(self.information_db, self.transaction_ids_table))
+        
+        df_source_view = df_unified_customer_source.join(df_trans_ids, on=[df_unified_customer_source.source_system_id == df_trans_ids.lead_xref], how='LEFT')
+        df_source_view = df_source_view.withColumn('in_store', F.when(F.col('lead_xref') == F.col('source_system_id'), 1).otherwise(0))
+        df_source_view = df_source_view.select('customerid', 'in_store').drop(df_source_view.lead_xref)
+        df_in_store_ind = df_source_view.groupBy('customerid').agg(F.max('in_store').alias('in_store_ind'))
+        df_in_store_ind.createOrReplaceTempView('in_store_ind')
+
+        df_cip_cust_activity = spark.sql('SELECT * FROM {}.{}'.format(self.staging_db, self.cip_activity_table))
+        df_cip_cust_activity.createOrReplaceTempView('cip_activity')
+
+        result_query = '''SELECT u.customerid as unified_cust_id
+                            ,c.src_create_ts as registration_date
+                            ,reg.registration_channel
+                            ,cip.is_active_cip
+                            ,CASE WHEN u.version = u.version THEN NULL ELSE u.version END as expiry_date
+                            ,CASE WHEN S.in_store_ind = 1 THEN 1 ELSE 0 END as in_store_ind
+                            ,CASE WHEN C.unified_cust_id is not null then 'Y' else 'N' END as single_profile_ind
+                            ,CASE WHEN sng.unified_cust_id is not null and
+                             sng.tnc_accepted_at_grocery is not null then 'Y' else 'N' END as channel_grocery_ind
+                            ,CASE WHEN sng.unified_cust_id is not null and
+                             (sng.tnc_accepted_at_sng_kiosk is not null or sng.tnc_accepted_at_sng_mobile is not null)
+                              then 'Y' else 'N' END as channel_sng_ind
+                            ,CASE WHEN sng.unified_cust_id is not null and
+                             sng.tnc_accepted_at_george is not null then 'Y' else 'N' END as channel_george_ind
+                            ,CASE WHEN sng.unified_cust_id is not null and
+                             sng.tnc_accepted_at_btc is not null then 'Y' else 'N' END as channel_baby_ind
+                            ,CASE WHEN sng.unified_cust_id is not null and
+                             sng.tnc_accepted_at_giftcards is not null then 'Y' else 'N' END as channel_giftcards_ind
+                            ,CASE WHEN sng.unified_cust_id is not null and
+                             sng.tnc_accepted_at_loyalty is not null then 'Y' else 'N' END as channel_loyalty_ind
+                            FROM unified_customer_view u
+                            LEFT OUTER JOIN cust_ucid_view c ON u.customerid = c.unified_cust_id
+                            LEFT OUTER JOIN in_store_ind S ON u.customerid = S.customerid
+                            LEFT OUTER JOIN singl_profl_view sng ON c.singl_profl_id = sng.singl_profl_id
+                            and sng.unified_cust_id = c.unified_cust_id
+                            LEFT OUTER JOIN reg_view reg on c.unified_cust_id = reg.unified_cust_id
+                            LEFT OUTER JOIN cip_activity cip on u.customerid = cip.unified_cust_id'''
+
+        df_result = spark.sql(result_query)
+        df_result.write.mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+    
+aa = customerInform()
+aa.run()

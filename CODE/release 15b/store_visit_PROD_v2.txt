@@ -1,0 +1,64 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+#from cip.cip.framework.logging.inboundLogging import aa
+import subprocess
+from datetime import datetime, timedelta
+import pyspark.sql.functions as F
+
+class store_visit:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table (requires adding to config.yaml)
+        self.target_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["csm_tables"]["cdd_raw_store_visit"]
+        self.target_table = 'cdd_raw_store_visit'
+
+        #Source Table
+        self.source_db = cnt["Datalake"]["source_database"]["store_database"]
+        #self.source_table = cnt["Datalake"]["source_tables"]["store_visit"] # requires adding to config.yaml
+        self.source_table = 'store_visit'
+        '''
+        #self.highwatermark_path = cnt["highwatermark"]["store_visit_raw_dir"]
+        #self.run_path = cnt["run_path"]["root_path"]
+        self.run_path = "/user/svc_uk_cust_rdl"
+        self.highwatermark_path = '/state/store_visit_max_date.txt'
+        self.highwatermark_raw = \
+                spark.read.csv(str(self.run_path) + str(self.highwatermark_path)).rdd.flatMap(lambda x: x).collect()[0]
+        self.highwatermark_int1 = datetime.strptime(self.highwatermark_raw, '%Y-%m-%d')
+        self.highwatermark_int2 = self.highwatermark_int1 - timedelta(days=3)
+        self.highwatermark = self.highwatermark_int2.strftime("%Y-%m-%d")
+
+        print(self.highwatermark)
+        '''
+    
+    def run(self):
+        print("****************Execution Start****************")
+
+        # for loading first time from RDL 
+        df_output = spark.sql("SELECT * FROM {}.{}".format(self.source_db,self.source_table))
+        df_output.write.partitionBy("visit_dt").mode("overwrite").saveAsTable("{}.{}".format(self.target_db,self.target_table))
+        #aa.run(df_output, self.target_db, self.target_table)
+      
+        '''
+        #for loading subsequent data, table should be refreshed daily ingesting the last 3 days data.
+        df_output = spark.sql("SELECT * FROM {}.{} WHERE visit_dt >= '{}'".format(self.source_db,self.source_table, self.highwatermark))
+        spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+        df_output.write.mode("overwrite").insertInto("{}.{}".format(self.target_db, self.target_table), overwrite=True)
+        #Over the high watermark
+        new_max_date = df_output.agg(F.max('visit_dt')).collect()[0][0]
+
+        proc = subprocess.Popen(
+            "echo " + str(new_max_date) + " |" + " hadoop fs -put -f - " + str(self.run_path) + str(
+                self.highwatermark_path),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+        (output, errors) = proc.communicate()
+        '''
+        print("*******************Execution End*********************")
+
+ts = store_visit()
+ts.run()

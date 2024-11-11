@@ -1,0 +1,88 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+
+class product_sales:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdl_odl_product_sales"]
+        self.target_table = 'cdd_odl_product_sales_uat_2022_07_06'
+        # Source Details
+        self.source_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.source_table = cnt["Customer_Staging_Mart"]["csm_tables"]["fact_store_visit_scan"]
+        self.source2_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.source2_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdl_odl_dim_item_hierarchy"]
+
+    def run(self):
+        print("************** SPARK JOB Inititated****************")
+        sql_text = ''' SELECT mds_fam_id,item_nbr,item_desc_1,upc_nbr,dept_nbr,dept_desc,catg_id,catg_desc,bu_id,bu_desc,trad_div_id,trad_divn,mdse_catg_nbr,mdse_catg_desc,mdse_subcatg_nbr,mdse_subcatg_desc,subclass_nbr,subclass_desc,fineline_nbr,fineline_desc,vendor_nbr,vendor_nm,
+                        item_desc_2,upc_desc,plu_nbr,cons_item_nbr,cons_item_desc,prod_nbr,prod_desc,brand_id,brand_desc,
+                        brand_fam_nm,item_status_cd,item_status_desc,item_status_chng_dt,item_create_dt,item_type_cd,item_type_desc,asort_type_cd,asort_type_desc,prime_xref_item_nbr,prime_xref_mds_fam_id,prime_lia_item_nbr,prime_lia_mds_fam_id,alcohol_pct,prime_upc_mds_fam_id,upc_fmt_cd,upc_fmt_desc
+                        FROM
+                        {}.{}'''.format(self.source2_db, self.source2_table)
+
+        dim_hier_df = spark.sql(sql_text)
+
+        dim_hier_df.createOrReplaceTempView("dim_item_hierarchy")
+
+        df_scan_visit_temp = spark.sql('''SELECT scan_id,visit_dt,scan_rtl_amt FROM gb_customer_data_domain_raw.cdd_raw_store_visit_scan''')
+
+        df_scan_visit = df_scan_visit_temp.filter(df_scan_visit_temp.visit_dt >= F.add_months(F.current_date(), -36))
+
+        df_scan_visit_3yrs = df_scan_visit.groupBy('scan_id').agg(F.sum('scan_rtl_amt').alias("sales_3_yrs"))
+
+        df_scan_visit_3yrs.createOrReplaceTempView("sales_3yrs")
+
+        df_scan_visit_2 = df_scan_visit_temp.filter(df_scan_visit_temp.visit_dt >= F.add_months(F.current_date(),-12))
+
+        df_scan_visit_1yr = df_scan_visit_2.groupBy('scan_id').agg(F.sum('scan_rtl_amt').alias("sales_1_yr"))
+
+        df_scan_visit_1yr.createOrReplaceTempView("sales_1yr")
+
+        df_scan_visit_3 = df_scan_visit_temp.filter(df_scan_visit_temp.visit_dt >= F.date_sub(F.current_date(), 28))
+
+        df_scan_visit_4weeks = df_scan_visit_3.groupBy('scan_id').agg(F.sum('scan_rtl_amt').alias("sales_4_weeks"))
+
+        df_scan_visit_4weeks.createOrReplaceTempView("sales_4weeks")
+
+        df_product_sales_1 = spark.sql('''SELECT mds_fam_id,item_nbr,item_desc_1,upc_nbr,dept_nbr,dept_desc,catg_id,catg_desc,bu_id,bu_desc,trad_div_id,trad_divn,mdse_catg_nbr,mdse_catg_desc,mdse_subcatg_nbr,mdse_subcatg_desc,subclass_nbr,subclass_desc,fineline_nbr,fineline_desc,vendor_nbr,vendor_nm,item_desc_2,upc_desc,plu_nbr,cons_item_nbr,cons_item_desc,
+                                     prod_nbr,prod_desc,brand_id,brand_desc,brand_fam_nm,item_status_cd,item_status_desc,item_status_chng_dt,item_create_dt,item_type_cd,item_type_desc,asort_type_cd,asort_type_desc,prime_xref_item_nbr,prime_xref_mds_fam_id,prime_lia_item_nbr,prime_lia_mds_fam_id,alcohol_pct,prime_upc_mds_fam_id,upc_fmt_cd,upc_fmt_desc,CASE WHEN s3.sales_3_yrs IS NOT NULL THEN s3.sales_3_yrs ELSE 0 end as sales_3_yrs,CASE WHEN s1.sales_1_yr IS NOT NULL THEN s1.sales_1_yr ELSE 0 end as sales_1_yr,CASE WHEN s4.sales_4_weeks IS NOT NULL THEN s4.sales_4_weeks ELSE 0 end as sales_4_weeks FROM dim_item_hierarchy dih INNER JOIN  sales_3yrs s3 ON dih.mds_fam_id = s3.scan_id LEFT JOIN sales_1yr s1 ON dih.mds_fam_id = s1.scan_id LEFT JOIN sales_4weeks s4 ON dih.mds_fam_id = s4.scan_id ''')
+
+        df_product_sales_1.createOrReplaceTempView("dim_hierarchy_1")
+
+        df_product_sales_2 = spark.sql('''SELECT dih.mds_fam_id,dih.item_nbr,dih.item_desc_1,dih.upc_nbr,dih.dept_nbr,dih.dept_desc,dih.catg_id,dih.catg_desc,dih.bu_id,dih.bu_desc,dih.trad_div_id,dih.trad_divn,dih.mdse_catg_nbr,dih.mdse_catg_desc,dih.mdse_subcatg_nbr,dih.mdse_subcatg_desc,dih.subclass_nbr,dih.subclass_desc,dih.fineline_nbr,dih.fineline_desc,dih.vendor_nbr,dih.vendor_nm,dih.item_desc_2,dih.upc_desc,dih.plu_nbr,dih.cons_item_nbr,dih.cons_item_desc,
+                                             dih.prod_nbr,dih.prod_desc,dih.brand_id,dih.brand_desc,dih.brand_fam_nm,dih.item_status_cd,dih.item_status_desc,dih.item_status_chng_dt,dih.item_create_dt,dih.item_type_cd,dih.item_type_desc,dih.asort_type_cd,dih.asort_type_desc,dih.prime_xref_item_nbr,dih.prime_xref_mds_fam_id,dih.prime_lia_item_nbr,dih.prime_lia_mds_fam_id,dih.alcohol_pct,dih.prime_upc_mds_fam_id,dih.upc_fmt_cd,dih.upc_fmt_desc
+                                             ,CASE WHEN s3.sales_3_yrs IS NOT NULL THEN s3.sales_3_yrs ELSE 0 end as sales_3_yrs
+                                             ,CASE WHEN s1.sales_1_yr IS NOT NULL THEN s1.sales_1_yr ELSE 0 end as sales_1_yr
+                                             ,CASE WHEN s4.sales_4_weeks IS NOT NULL THEN s4.sales_4_weeks ELSE 0 end as sales_4_weeks
+                                             
+                                             FROM dim_item_hierarchy dih
+                                             INNER JOIN sales_3yrs s3
+                                             ON dih.item_nbr = s3.scan_id
+                                             LEFT JOIN sales_1yr s1
+                                             ON dih.item_nbr = s1.scan_id
+                                             LEFT JOIN sales_4weeks s4
+                                             ON dih.item_nbr = s4.scan_id
+                                             LEFT JOIN dim_hierarchy_1 dh
+                                             ON dih.item_nbr = dh.item_nbr
+                                             where dh.item_nbr is null ''')
+
+        df_product_sales_2.createOrReplaceTempView("dim_hierarchy_2")
+
+        df_product_sales = spark.sql(''' select * from dim_hierarchy_1
+                                         union
+                                         select * from dim_hierarchy_2 ''')
+
+        df_product_sales.repartition(500)
+
+        df_product_sales.write.mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+        print("************** SPARK JOB complete****************")
+
+
+ts = product_sales()
+ts.run()

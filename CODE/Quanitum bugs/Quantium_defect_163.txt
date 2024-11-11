@@ -1,0 +1,133 @@
+Defect #163 – Outstanding issues
+-- transaction_ids / customer basket extract cip flag logic issue 08/2022
+
+-----------------------------------------
+ --ROW 2: 14 baskets with cip_rptg_ind = 1
+ ----------------------------------------
+/* Quanitum feedback: •	Row 2: These baskets have a valid LOYALTY_ID (wallet_id)  but null CUSTOMER_ID (unified_cust_id) and TENDER_CARD_ID (lead xref) so they 	should be flagged as ‘0’ instead of ‘1’ and grouped together with the baskets in the first row
+
+cip_rptg_ind derivation logic:
+	CASE WHEN  (channel_id = '1' AND lead_xref IS NULL) 
+		    OR (channel_id = '2' AND singl_profl_id IS NULL)
+   	     OR (channel_id = 2 AND singl_profl_id IS NULL AND lead_xref IS NULL) THEN 0
+	ELSE 1 END AS cip_rptg_ind
+ */
+
+--looking at examples given in transaction_ids UAT table
+select *
+from gb_customer_data_domain_odl.cdd_odl_transaction_ids_uat_2022_05_27 
+WHERE basket_id IN ('202203034676206201919', '202204194386210903100', '202206035869215402301') --examples given in email 
+
+--these are flagged as cip flag = 1 as they fall into the ELSE 1 bucket on that derivation (channel_id = 3 / scan and go) 
+
+-- all 14 baskets:
+select basket_id
+from gb_customer_data_domain_rpt.cdd_rpt_redesign_customer_basket_uat_2022_07_21 
+where cip_rptg_ind = 1 AND unified_cust_id IS NULL AND wallet_id IS NOT NULL AND lead_xref IS NULL 
+
+select *
+from gb_customer_data_domain_odl.cdd_odl_transaction_ids_uat_2022_05_27 
+WHERE basket_id IN (
+'202205284934214800851',
+'202205244699214403623',
+'202205214440214100853',
+'202205234692214303495',
+'202205234639214304655',
+'202205234613214302698',
+'202205234274214302249',
+'202205224160214202983',
+'202205285889214802647',
+'202205284657214802090',
+'202205315865215102230',
+'202206054229215601331',
+'202205204576214002708',
+'202205305807215000657')
+
+--confirmed, these baskets are all channel_id = 3 so flagged as cip_rptg_ind = 1 
+
+
+------------------------------------------
+-- ROW 3: 67 baskets with cip_rptg_ind = 1
+------------------------------------------
+/* Quantium feedback: •	Row 3: These baskets have a valid LOYALTY_ID (wallet_id) and TENDER_CARD_ID (leadxref) but null CUSTOMER_ID (unified_cust_id). 
+   What are some example customer-types that would fall into this bucket? Our understanding was that if there was a valid tender card ID attached to the basket then we should also have a valid UCID (i.e., customer ID should not be null)
+*/
+
+--get all 67 examples 
+
+select basket_id
+from gb_customer_data_domain_rpt.cdd_rpt_redesign_customer_basket_uat_2022_07_21 
+where cip_rptg_ind = 1 AND unified_cust_id IS NULL AND wallet_id IS NOT NULL AND lead_xref IS NOT NULL 
+
+select *
+from gb_customer_data_domain_odl.cdd_odl_transaction_ids_uat_2022_05_27 
+WHERE basket_id IN ('202202074676203804634',
+'202203034676206201919',
+'202205034947212300843',
+'202202124576204305975',
+'202204054947209500661',
+'202204054947209500655',
+'202204054274209503265',
+'202201294576202905780',
+'202201134676201301628',
+'202201064676200601696',
+'202201104576201005156',
+'202203294274208804611',
+'202204255869211504111',
+'202203254676208403257',
+'202203234274208204123',
+'202201024576200203043',
+'202206044664215504666',
+'202206044274215501352',
+'202202174676204801540',
+'202203104676206901619',
+'202204134676210304110',
+'202205135869213301982',
+'202201204676202001158',
+'202202264576205706282',
+'202203304947208904515',
+'202204124947210200587',
+'202204124947210200581',
+'202204124386210202782',
+'202203195865207803547',
+'202205024676212206015',
+'202204194947210900590',
+'202204194386210903100',
+'202205244947214400591',
+'202205244947214400586',
+'202205244274214403426',
+'202205304964215003321',
+'202205234274214303631',
+'202201314676203103836',
+'202203174676207601799',
+'202204044676209404850',
+'202204264947211600733',
+'202205124676213202336',
+'202201274676202706741',
+'202205104947213000655',
+'202205104676213004662',
+'202204144386210403905',
+'202202064576203703368',
+'202203314676209004742',
+'202204024964209205027',
+'202206014676215204214',
+'202206014964215205650',
+'202206074947215800648',
+'202206074947215800646',
+'202205205869214004713',
+'202206035869215402301',
+'202206064676215704920',
+'202206064274215704173',
+'202205214989214102414',
+'202204185869210804139',
+'202204204948211001887',
+'202205174947213700692',
+'202205174947213700703',
+'202205224639214203875',
+'202206025869215304402',
+'202206024274215300127',
+'202205314947215100311',
+'202205314947215100301')
+
+-- ALL baskets are channel_id = 3 / flagged as 1 as per current logic 
+

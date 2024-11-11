@@ -1,0 +1,166 @@
+from cip.cip.framework.connections.spark import spark
+import datetime
+import subprocess
+import pyspark.sql.functions as F
+
+class rpt_COGs:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+
+        #TARGET TABLE
+        self.odl_db = 'gb_customer_data_domain_odl'
+        self.target_table = 'cdd_odl_qpromo_cogs_uatRP'
+
+
+    def run(self):
+
+        print("************** SPARK JOB Initiated****************")
+
+        spd = spark.sql(""" select * from gb_customer_data_domain_raw.cdd_raw_sku_dly_pos_unpivot_adj """)
+        spd.createOrReplaceTempView("sdp")	
+
+        itm = spark.sql(""" select * from gb_customer_data_domain_raw.cdd_raw_qpromo_item_versioned """")	
+        itm.createOrReplaceTempView("itm")
+                
+        mds = spark.sql(""" select * from gb_customer_data_domain_raw.cdd_raw_qpromo_sku_ty_dly_mumd_unpivot""")
+        mds.createOrReplaceTempView("mds")
+
+        
+        df1 = spark.sql("""SELECT
+                            sdp.gregorian_date,
+                            sdp.store_nbr,
+                            sdp.item_nbr,
+                            SUM(sdp.qty) AS units_sold,
+                            SUM(sdp.sales_amt) AS sale_amount_excluding_vat,
+                            0 AS net_markup_markdown_amount_excluding_in_the_bin
+                            from sdp
+                            inner join itm
+                            on sdp.item_nbr = itm.item_nbr
+                            and (gregorian_date >= ldm_recordstartdate and gregorian_date < ldm_recordenddate)
+                            WHERE dept_nbr IN ( 48, 50, 51 ) AND itm.vnpk_weight_fmt_cd = 'V'
+                            GROUP BY
+                            sdp.gregorian_date,
+                            sdp.store_nbr,
+                            sdp.item_nbr
+                            HAVING
+                            SUM(sdp.sales_amt) <> 0 """)
+        final_df = df1
+        '''
+        df2 = spark.sql(""" SELECT
+                            mds.gregorian_date AS sale_date,
+                            mds.store_nbr AS store_nbr,
+                            itm.item_nbr AS teradata_item_number,
+                            {} AS units_sold,
+                            {} AS sale_amount_excluding_vat,
+                            SUM(mds.cur_tot_retl - mds.pre_tot_retl) AS net_markup_markdown_amount_excluding_in_the_bin
+                            FROM  mds
+                            inner join itm
+                            on mds.item_nbr = itm.item_nbr
+                            and (gregorian_date >= ldm_recordstartdate and gregorian_date < ldm_recordenddate)
+                            WHERE dept_nbr IN ( 48, 50, 51 ) AND itm.vnpk_weight_fmt_cd = 'V'
+                            AND event_id in (5600, 1600, 1814, 5814)
+                            GROUP BY
+                            mds.gregorian_date,
+                            mds.store_nbr,
+                            itm.item_nbr
+                            HAVING
+                            SUM(mds.cur_tot_retl - mds.pre_tot_retl) <> {} """.format(fill))
+
+        sls = df1.union(df2)
+        sls.createOrReplaceTempView("sls")
+
+        inr1 = spark.sql("""SELECT
+                    sls.gregorian_date,
+                    sls.store_nbr,
+                    itm.item_nbr,
+                    sls.units_sold AS units_sold,
+                    sls.sale_amount_excluding_vat AS sale_amount_excluding_vat,
+                    ( CAST( sls.sale_amount_excluding_vat AS FLOAT) -
+                    CAST( sls.net_markup_markdown_amount_excluding_in_the_bin AS FLOAT) )
+                    / CAST(itm.base_unit_rtl_amt AS FLOAT)
+                    * ( CAST(itm.vnpk_cost_amt AS FLOAT) / CAST(itm.vnpk_weight_qty AS FLOAT) ) AS cost_of_sales_amount_excluding_waste
+                    from sls inner join itm
+                    on sls.ITEM_NBR = itm.item_nbr
+                    and (gregorian_date >= ldm_recordstartdate and gregorian_date < ldm_recordenddate)""")
+                        
+        inr1.createOrReplaceTempView("inr1")													
+
+        inr2 = inr1.spark.sql(""" select inr1.gregorian_date,
+                            inr1.store_nbr,
+                            inr1.item_nbr,
+                            CASE
+                            WHEN SUM(inr.units_sold) = {}
+                            THEN {}
+                            ELSE SUM(inr1.cost_of_sales_amount_excluding_waste) / SUM(inr.units_sold)
+                            END AS unit_cost_price,
+                            SUM(inr1.units_sold) AS units_sold,
+                            SUM(inr1.sale_amount_excluding_vat) AS sale_amount_excluding_vat,
+                            SUM(inr1.cost_of_sales_amount_excluding_waste) AS cost_of_sales_amount_excluding_waste
+                            from inr1
+                            GROUP BY
+                            inr1.GREGORIAN_DATE,
+                            inr1.STORE_NBR,
+                            inr1.ITEM_NBR
+                            HAVING
+                            SUM(inr1.units_sold) <> {}
+                            OR SUM(inr1.Sale_Amount_Excluding_VAT) <> {}
+                            OR SUM(inr1.Cost_Of_Sales_Amount_Excluding_Waste) <> {} """.format(fill)) 								
+
+        dih = spark.sql("""select * from gb_customer_data_domain_odl.cdd_odl_dim_item_hierarchy where original_cin is not null """)
+        
+        dih_inr2 = 	inr2.join(dih, on=[dih.mds_fam_id == inr2.item_nbr], how="INNER") 
+        
+        prod = spark.sql("""select original_cin as p_original_cin from gb_customer_data_domain_rpt.cdd_rpt_product where original_cin is not null """)
+
+        dih_inr2_prod = dih_inr2.join(prod, on=[dih_inr2.original_cin == prod.p_original_cin], how="INNER")
+        
+        orig = spark.sql(""" select
+                        sdp.gregorian_date as sale_date,
+                        sdp.store_nbr as store_nbr,
+                        sdp.item_nbr as item_nbr,
+                        CAST((itm.vnpk_cost_amt / CAST(itm.vnpk_qty AS DECIMAL(18,4))) AS DECIMAL(9,2)) AS unit_cost_price,
+                        SUM(qty) AS units_sold,
+                        SUM(sales_amt) AS sales_amount_excluding_vat,
+                        SUM(sdp.QTY * CAST((itm.vnpk_cost_amt / CAST(itm.vnpk_qty AS DECIMAL(18,4))) AS DECIMAL(9,2))) AS sale_retail_cost_amount
+                        from sdp
+                        inner join itm
+                        on sdp.item_nbr = itm.item_nbr
+                        and (gregorian_date >= ldm_recordstartdate and gregorian_date < ldm_recordenddate)
+                        WHERE dept_nbr IN ( 48, 50, 51 ) AND itm.vnpk_weight_fmt_cd <> 'V'
+                        OR itm.dept_nbr NOT IN ( 48, 50, 51 )
+                        GROUP BY
+                        sdp.gregorian_date,
+                        sdp.store_nbr,
+                        sdp.item_nbr,
+                        CAST((itm.vnpk_cost_amt / CAST(itm.vnpk_qty AS DECIMAL(18,4))) AS DECIMAL(9,2))""")
+
+        joined = orig.union(dih_inr2_prod).drop("original_cin")
+        joined.createOrReplaceTempView("joined")
+        
+        final_df = spark.sql("""select p_original_cin as original_cin,
+                inr.sale_date AS sale_date,
+                inr.STORE_NBR AS store_nbr,
+                inr.ITEM_NBR AS mds_fam_id,
+                inr.Unit_Cost_Price AS unit_cost_price,
+                SUM(inr.units_sold) AS units_sold,
+                SUM(inr.Sales_Amount_Excluding_VAT) AS Sales_Amount_Excluding_VAT,
+                SUM(inr.Sale_Retail_Cost_Amount) AS Sale_Retail_Cost_Amount
+                from joined 
+                GROUP BY
+                    p.original_cin,
+                    inr.sale_date,
+                    inr.store_nbr,
+                    inr.item_nbr,
+                    inr.unit_cost_price """)
+        '''            
+        final_df.writewrite.mode("overwrite").saveAsTable("{}.{}".format(self.odl_db, self.target_table))
+
+        print("*****************END*********************************")
+
+ts = rpt_COGs()
+ts.run()
+
+
+                

@@ -1,0 +1,37 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+class unified_cust_id_mapping:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        #self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_unified_cust_id_mapping"]
+
+
+    def run(self):
+        print("****************Execution Start****************")
+
+        # reading odl_pos_transaction table from hive
+        df_output = spark.sql('''SELECT customerid as unified_cust_id, source_system_id, pihash, xref, blacklist, cbb_seen, version, source FROM gb_customer_data_domain_secured_raw.cdd_raw_unified_customer_table''')
+        li = ["sp", "store"]
+        df_output = df_output.filter(F.col('source').isin(li))
+
+        # write to Hive
+        spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+
+        #for loading subsequent data, table should be refreshed daily.
+       # df_output.write.mode("overwrite").insertInto("gb_customer_data_domain_odl.cdd_odl_unified_cust_id_mapping")
+
+        # for loading first time
+        df_output.write.mode("overwrite").saveAsTable("gb_customer_data_domain_odl.cdd_odl_unified_cust_id_mapping")
+
+        print("*******************Execution End*********************")
+
+aa = unified_cust_id_mapping()
+aa.run()

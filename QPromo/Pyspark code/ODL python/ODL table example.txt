@@ -1,0 +1,43 @@
+###EXAMPLE OF ODL LAYER BUILD USING SPARK SQL ##
+
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+
+
+class dim_store:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_dim_store"]
+
+    def run(self):
+        print("************** SPARK JOB Inititated****************")
+        sql_text = '''SELECT B.Branch_Nbr AS store_nbr, B.Branch_Nm AS store_nm, L.Postcode AS postal_cd, CASE WHEN B.Branch_Nbr = 5150 THEN '81' ELSE B.Store_Div_Nbr END AS division_nbr,
+                             CASE WHEN B.Branch_Nbr = 5150 THEN 'CLOSED STORES' ELSE B.Store_Div_Desc END AS division_nm, B.Region_Nbr AS region_nbr, B.Region_Desc AS region_nm,
+                             L.Uk_Country_Cd AS cntry_cd, L.Uk_Country_nm AS cntry_nm, coalesce(B.Store_Format_ID, sf.format_cd) AS format_cd ,
+                             coalesce(B.Store_Format_Desc,sf.format_nm) AS format_nm, coalesce(sft.cip_format_cd, B.Store_Format_ID, sf.format_cd) AS cip_format_cd,
+                      case when sf.store_nbr in ('4425', '4848','4892', '5123') Then 'SMALL STORE' ELSE coalesce(sft.cip_format_nm, B.Store_Format_Desc, sf.format_nm) END AS cip_format_nm,
+                             case when sf.store_nbr in ('4425', '4848','4892', '5123') Then 'SMALL STORE' ElSE coalesce(case when B.Store_Format_ID = 3 then sft.cip_format_nm else coalesce(B.Store_Format_Desc,sf.format_nm) end) end AS cip_sub_format_nm,
+                             L.latitude AS latitude, L.Longitude AS longitude,
+                             L.Open_Dt AS open_dt, L.Operational_Close_Dt AS close_dt
+                        FROM gb_customer_data_domain_raw.cdd_raw_dim_branch B
+                        LEFT OUTER JOIN gb_customer_data_domain_raw.cdd_raw_dim_location L
+                          ON B.Branch_Nbr = L.Location_Nbr
+                        LEFT OUTER JOIN gb_customer_data_domain_raw.cdd_raw_store_format_config sf
+                          ON sf.store_nbr = B.Branch_Nbr
+                        LEFT OUTER JOIN gb_customer_data_domain_raw.cdd_raw_store_format_type_config sft
+                          ON sft.format_cd = B.Store_Format_ID
+                       WHERE B.Branch_Status_Cd between 1 and 7
+                         AND B.Branch_Nm not like 'PFS%'
+                         AND L.Open_dt != L.Operational_Close_dt'''
+
+        source_df = spark.sql(sql_text)
+        source_df.write.mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+        print("************** SPARK JOB complete****************")
+
+
+ts = dim_store()
+ts.run()

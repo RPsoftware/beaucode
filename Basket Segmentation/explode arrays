@@ -1,0 +1,302 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+class grocProd:
+
+    def __init__(self):
+        """
+                Assigning Variable from config file
+        """
+        # Source table
+        #self.source_db = 'gb_product_dl_tables'
+        #self.source_table = 'groc_prod'
+
+        # RAW TARGET Table
+        self.target_db = 'gb_customer_data_domain_raw'
+        self.target_table = 'cdd_raw_groc_prod_explode_arrays'
+
+    def run(self):
+        print("****************Execution Start****************")
+
+
+	groc_prod_df = spark.sql('''select sku_id, 
+									cons_item_nbr,
+									sku_type_cd,
+									prmry_shelf_id,
+									prmry_aisle_id,
+									prmry_dept_id,
+									prmry_catg_id,
+									--extd_taxonomy_desc,
+									tot_ratg_nbr,
+									avg_ratg_nbr,
+									--prod_rstr_txt,
+									--upc_lst_txt,
+									--untraited_store_lst_txt,
+									prod_id,
+									disp_onln_ind,
+									prod_status_nm,
+									prod_start_dt,
+									prod_end_dt,
+									prod_disp_nm,
+									prod_desc,
+									cart_desc,
+									brand_nm,
+									addl_info_txt,
+									picker_desc,
+									addl_picker_desc,
+									sales_type_cd,
+									avg_wt_qty,
+									max_allow_qty,
+									max_allow_home_shopping_cntr_qty,
+									coming_soon_txt,
+									sub_ind,
+									bws_rstr_ind,
+									pharm_rstr_ind,
+									meta_srch_keywords_txt,
+									prod_scene_img_id,
+									prod_scene_img_host_nm,
+									promo_type_cd,
+									promo_start_dt,
+									promo_end_dt,
+									coming_soon_prod_price_ind,
+									on_sale_ind,
+									promo_was_price_amt,
+									frsh_dys_cnt,
+									frsh_min_dys_cnt,
+									frsh_max_dys_cnt,
+									sell_by_dt,
+									favourites_isrt_ind,
+									favourites_isrt_start_dt,
+									favourites_isrt_end_dt,
+									remove_from_cust_shopping_lst_ind,
+									favourites_remove_ind,
+									--bundle_lst_txt,
+									bundle_price_amt,
+									--icon_lst_txt,
+									--facet_lst_txt,
+									--sub_lst_txt,
+									cust_base_rtl_amt,
+									base_unit_rtl_amt,
+									sell_qty,
+									unit_cost_amt,
+									price_comp_qty,
+									vnpk_qty,
+									vnpk_cube_qty,
+									vnpk_wt_qty,
+									dept_nbr,
+									create_dt,
+									upd_dt,
+									us_upc_nbr,
+									prod_status_cd,
+									sell_uom_cd,
+									price_comp_uom_cd,
+									uniq_prod_id,
+									vnpk_cube_uom_cd,
+									vnpk_wt_uom_cd,
+									last_modfd_ind,
+									price_upd_ind,
+									prod_size_qty,
+									item_status_cd,
+									assoc_disc_ind,
+									eu_upc_nbr,
+									src_rcv_ts,
+									load_ts,
+									load_userid,
+									upd_ts,
+									upd_userid,
+									asset_type_cd,
+									win_nbr,
+									bws_ind,
+									fineline_nbr,
+									repl_unit_ind,
+									repl_ind,
+									--item_subclass_map_json_desc,
+									prmry_shelf_nbr,
+									pub_ind,
+									bb_json_txt,
+									ean_id,
+									--bb_nutritional_info_json_txt,
+									--bb_nutritional_val_json_txt,
+									src_pub_dt	FROM gb_customer_data_domain_raw.cdd_raw_groc_prod''')
+	
+	#arrays/dicts to explode/split - printSchema to check split/explode ok 
+    
+	extd_tax_desc_df = spark.sql('''select g.sku_id, keys.* FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g LATERAL VIEW 						inline(extd_taxonomy_desc) keys ''')
+	extd_tax_desc_df.printSchema()
+	
+	prod_rstr_txt_df = spark.sql('''select g.sku_id, keys.* FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g LATERAL VIEW inline(prod_rstr_txt) keys ''')
+	prod_rstr_txt_df.printSchema()
+	
+	upc_lst_txt_df = spark.sql('''select sku_id, explode_outer(upc_lst_txt) as upc_lst_txt FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g''')
+	upc_lst_txt_df.printSchema()
+	
+	untraited_store_lst_txt_df = ('''select sku_id, explode_outer(untraited_store_lst_txt) as untraited_store_lst_txt FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g''')
+	untraited_store_lst_txt_df.printSchema()
+	
+	bundle_lst_txt_df = spark.sql('''select g.sku_id, keys.* FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g LATERAL VIEW inline(bundle_lst_txt) keys ''')
+	bundle_lst_txt_df.printSchema()
+	
+	icon_lst_txt_df = spark.sql('''select sku_id, explode_outer(icon_lst_txt) as icon_lst_txt FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g''')
+	icon_lst_txt_df.printSchema()
+	
+	facet_lst_txt_df = spark.sql('''select sku_id, explode_outer(facet_lst_txt as facet_lst_txt FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g''')
+	facet_lst_txt_df.printSchema()
+	
+	sub_lst_txt_df = spark.sql('''select sku_id, explode_outer(sub_lst_txt) assub_lst_txt FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g''')
+	sub_lst_txt_df.printSchema()
+	
+	item_subclass_map_json_desc_df = spark.sql('''select g.sku_id, keys.* FROM gb_customer_data_domain_raw.cdd_raw_groc_prod g LATERAL VIEW inline(item_subclass_map_json_desc) keys ''')
+	item_subclass_map_json_desc_df.printSchema()
+	
+	bb_nutritional_info_json_txt = 
+	bb_nutritional_info_json_txt = bb_nutritional_info_json_txt.selectExpr("""
+												explode(
+													transform(
+														split(ColumnY, ','), 
+												x -> str_to_map(regexp_replace(x, '[\\\\[\\\\{ \\\\]\\\\}]', ''), ' ', ':')
+															)
+														) as col
+									""").select(F.explode('col')).groupBy().pivot('key').agg(F.first('value'))
+	bb_nutritional_info_json_txt.printSchema()
+	
+
+	# join data 
+	df_final = groc_prod_df.join(extd_taxonomy_desc, on "sku_id", how=LEFT)
+	df_final = df_final.join(prod_rstr_txt_df, on "sku_id" ,how=LEFT)
+	df_final = df_final.join(upc_lst_txt_df, on "sku_id", how=LEFT)
+	df_final = df_final.join(bundle_lst_txt, on=[("sku_id")], how='LFFT')
+	df_final = df_final.join(icon_lst_txt_df, on=[("sku_id")], how='LEFT')
+	df_final = df_final.join(facet_lst_txt_df, on=[("sku_id")], how='LEFT')
+	df_final = df_final.join(sub_lst_txt_df, on=[("sku_id")], how='LEFT')
+	df_final = df_final.join(item_subclass_map_json_desc_df, on=[("sku_id")], how='LEFT')
+	
+	df_final.printSchema()
+	
+	df_output = df_final
+	
+	'''
+	.select(sku_id, 
+									cons_item_nbr,
+									sku_type_cd,
+									prmry_shelf_id,
+									prmry_aisle_id,
+									prmry_dept_id,
+									prmry_catg_id,
+									aisle_id,
+									aisle_name, 
+									aisle_rank, 
+									category_id, 
+									category_name, 
+									category_rank, 
+									department_id,
+									department_name,
+									department_rank, 
+									shelf_id, 
+									shelf_name, 
+									shelf_rank,
+									tot_ratg_nbr,
+									avg_ratg_nbr,
+									dept_nbr, 
+									folder_desc, 
+									restriction_desc,
+									restriction_nbr,
+									upc_lst_txt,
+									untraited_store_lst_txt,
+									prod_id,
+									disp_onln_ind,
+									prod_status_nm,
+									prod_start_dt,
+									prod_end_dt,
+									prod_disp_nm,
+									prod_desc,
+									cart_desc,
+									brand_nm,
+									addl_info_txt,
+									picker_desc,
+									addl_picker_desc,
+									sales_type_cd,
+									avg_wt_qty,
+									max_allow_qty,
+									max_allow_home_shopping_cntr_qty,
+									coming_soon_txt,
+									sub_ind,
+									bws_rstr_ind,
+									pharm_rstr_ind,
+									meta_srch_keywords_txt,
+									prod_scene_img_id,
+									prod_scene_img_host_nm,
+									promo_type_cd,
+									promo_start_dt,
+									promo_end_dt,
+									coming_soon_prod_price_ind,
+									on_sale_ind,
+									promo_was_price_amt,
+									frsh_dys_cnt,
+									frsh_min_dys_cnt,
+									frsh_max_dys_cnt,
+									sell_by_dt,
+									favourites_isrt_ind,
+									favourites_isrt_start_dt,
+									favourites_isrt_end_dt,
+									remove_from_cust_shopping_lst_ind,
+									favourites_remove_ind,
+									bundle_link, 
+									qty,
+									bundle_price_amt,
+									icon_lst_txt,
+									facet_lst_txt,
+									sub_lst_txt,
+									cust_base_rtl_amt,
+									base_unit_rtl_amt,
+									sell_qty,
+									unit_cost_amt,
+									price_comp_qty,
+									vnpk_qty,
+									vnpk_cube_qty,
+									vnpk_wt_qty,
+									dept_nbr,
+									create_dt,
+									upd_dt,
+									us_upc_nbr,
+									prod_status_cd,
+									sell_uom_cd,
+									price_comp_uom_cd,
+									uniq_prod_id,
+									vnpk_cube_uom_cd,
+									vnpk_wt_uom_cd,
+									last_modfd_ind,
+									price_upd_ind,
+									prod_size_qty,
+									item_status_cd,
+									assoc_disc_ind,
+									eu_upc_nbr,
+									src_rcv_ts,
+									load_ts,
+									load_userid,
+									upd_ts,
+									upd_userid,
+									asset_type_cd,
+									win_nbr,
+									bws_ind,
+									fineline_nbr,
+									repl_unit_ind,
+									repl_ind,
+									mds_fam_id, 
+									subclass_nbr,
+									prmry_shelf_nbr,
+									pub_ind,
+									bb_json_txt,
+									ean_id,
+									--bb_nutritional_info_json_txt,
+									--bb_nutritional_val_json_txt,
+									src_pub_dt)
+	'''
+	
+	df_output.write.mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+    print("************** SPARK JOB complete****************")
+
+aa = grocProd()
+aa.run()
+

@@ -1,0 +1,63 @@
+with a as (
+    select distinct null as customerid
+,cust.singl_profl_id as source_system_id 
+,lower(trim(cust.title_cd)) as title, lower(replace(replace(replace(trim(cust.first_nm),'-',''),'"',''),'''','')) as first_name 
+,cust.mid_nm as middle_name, 
+lower(replace(replace(replace(trim(cust.last_nm),'-',''),'"',''),'''','')) As last_name 
+,lower(trim(cust.email_id)) as email_id 
+,COALESCE(trim(cntct.cntct_nm)
+,trim(cust.scndry_login_id)) as phone_nbr
+,trim(cr.pymt_token_txt) as pihash
+,trim(cr.ref_id) as xref
+,null as token_id
+,cust.guest_ind as guest_order_ind, 
+lower(trim(adr.first_nm)) as billing_first_name
+,lower(trim(adr.last_nm)) as billing_last_name 
+,lower(trim(adr.addr_line_1_txt)) as billing_address1
+,lower(trim(adr.addr_line_2_txt)) as billing_address2 
+,lower(trim(adr.addr_line_3_txt)) as  billing_address3
+,null as billing_address4,null as billing_address5
+,null as billing_address6 
+,lower(trim(adr.city_nm)) as billing_city
+,null as billing_county
+,lower(trim(adr.post_cd)) as billing_zip_Cd, 
+lower(trim(adr.st_nm)) as billing_state,lower(trim(adr.cntry_cd)) as billing_country, 
+lower(trim(adr.fmt_addr_txt)) as billing_address,  
+adr.lat_dgr as latitude
+, adr.long_dgr as longitude 
+,null as blacklist
+,null as cbb_seen
+,null as version
+,lower(cust.data_src_cd) as source
+,coalesce(date_format(cust.ingest_ts, 'yyMMdd'),999999) as ingestts 
+from (select singl_profl_id,title_cd,first_nm,last_nm,mid_nm,email_id,guest_ind,data_src_cd,ingest_ts,scndry_login_id from  coreprod.gb_customer_secured_dl_tables.cust where gdpr_del_ind=0 and ingest_ts 
+        between '2021-09-16' and '2024-09-16') cust ---remove any date filters on cust 
+left join (select cntct_nm,singl_profl_id from coreprod.gb_customer_secured_dl_tables.cust_cntct where cntct_type_nm ='PHONE' and gdpr_del_ind=0 and cust_del_ind=0) cntct on cust.singl_profl_id=cntct.singl_profl_id 
+left join (select singl_profl_id,pymt_token_txt,ref_id from coreprod.gb_customer_secured_dl_tables.cust_card_cme where gdpr_del_ind=0  and cust_del_ind=0) cr 
+on cust.singl_profl_id=cr.singl_profl_id 
+left join (select singl_profl_id,first_nm,last_nm,addr_line_1_txt,addr_line_2_txt,addr_line_3_txt,city_nm,post_cd,st_nm,cntry_cd,fmt_addr_txt, 
+lat_dgr,long_dgr from coreprod.gb_customer_secured_dl_tables.cust_addr  where gdpr_del_ind=0  and cust_del_ind=0 and (addr_usag_type_nm IS NULL or addr_usag_type_nm='shipTo')) adr 
+on cust.singl_profl_id=adr.singl_profl_id 
+
+union 
+
+select null as customerid,stor.acct_nbr as source_system_id,null as title,null as first_name,null as middle_name, 
+                null As last_name,null as email_id,null as phone_nbr,  
+                cr.pymt_token_txt as pihash,stor.acct_nbr as xref
+                ,token_id
+                ,null as guest_order_ind,  
+                null as billing_first_name,null as billing_last_name,null as billing_address1,null as billing_address2, null as  billing_address3, 
+                null as billing_address4,null as billing_address5,null as billing_address6,  
+               null as billing_city,null as billing_county,null as billing_zip_Cd ,null as billing_state,null as billing_country,null as billing_address 
+                ,null as latitude, null as longitude,null as blacklist,null as cbb_seen,null as version,'store' as source,  
+                coalesce(date_format(upd_ts,'yyMMdd'),999999) as partkey 
+                from (select trim(acct_nbr) as acct_nbr,max(upd_ts) as upd_ts, token_id  
+                from coreprod.gb_mb_store_secured_dl_tables.store_visit_tender where tndr_type_cd=8 and visit_dt between '2021-09-16' and '2024-09-16'
+                group by trim(acct_nbr), token_id) stor 
+                full outer join (select trim(pymt_token_txt) as pymt_token_txt,try_cast(ref_id as bigint) ref_id 
+                from coreprod.gb_customer_secured_dl_tables.cust_card_cme where gdpr_del_ind=0  and cust_del_ind=0) cr 
+                on (stor.acct_nbr=cr.ref_id) 
+
+                )
+
+                select count(*), count(distinct source_system_id), count(distinct xref), count(distinct token_id) from a 

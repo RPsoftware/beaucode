@@ -1,0 +1,47 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+from cip.cip.dataschema.staging.branchSchema import schema
+from cip.cip.framework.logging.inboundLogging import aa
+import datetime
+import subprocess
+from cip.cip.framework.files.generic_processes import archive_file
+
+class [Class name]:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+      today = datetime.datetime.today()
+        today = today.strftime('%Y%m%d')
+        self.target_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.target_table = cnt["Customer_Staging_Mart"]["csm_tables"]["@@@"]
+        self.path = str(cnt["run_path"]["root_path"]) + str(cnt["file_path"]["FTDW"]["@@@"])
+        self.archive_path = str(cnt["run_path"]["archive_path"]) + '/' + str(today) + str(
+            cnt["file_path"]["FTDW"]["@@@"])
+
+    def run(self):
+        print("************** SPARK JOB Inititated****************")
+
+        # read source file into dataframe
+        source_df = spark.read. \
+            format("csv"). \
+            schema(schema). \
+            option("header", "false"). \
+            option("delimiter", '|'). \
+            option("inferSchema", "true"). \
+            load(self.path)
+
+        # write dataframe into raw table with "overwrite partition" mode
+        source_df.write. \
+            mode("overwrite"). \
+            saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+        aa.run(source_df, self.target_db, self.target_table)
+
+        # archive source file once processed
+        archive_file(self.path, self.archive_path)
+ 
+        print("*******************Execution End*********************")
+
+ts = [class name]()
+ts.run()

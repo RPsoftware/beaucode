@@ -1,0 +1,76 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+from pyspark.sql.types import DecimalType, StringType, TimestampType
+from datetime import datetime, timedelta
+
+class rptCustPenTot:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.target_table = 'cdd_odl_cus_pen_stage1'
+
+        # Source Databases
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.report_db = cnt["Customer_Staging_Mart"]["cdd_rpt_database"]["extraction_database"]
+        self.staging_db = 'gb_customer_data_domain_raw'
+
+        # Src Tables
+        self.odl_trans = 'cdd_odl_pos_transaction'
+        self.odl_cb = 'cdd_odl_redesign_customer_basket'
+        self.raw_cal = 'cdd_raw_dim_calendar'
+        self.odl_dim_item = 'cdd_odl_dim_item_hierarchy'
+
+    def run(self):
+        print("****************START**************************")
+
+        #get customer basket data
+
+        cb_df = spark.sql("SELECT basket_id, unified_cust_id, visit_dt FROM {}.{} ".format(self.information_db, self.odl_cb))
+        cb_df.createOrReplaceTempView('data')
+        max_date = cb_df.agg(F.max('visit_dt')).collect()[0][0]
+        min_date = max_date - timedelta(100)
+
+        cb_df = spark.sql("select * from data where visit_dt >= '{}' ".format(min_date)).repartition(1500)
+        min_date = cb_df.agg(F.min('visit_dt')).collect()[0][0]
+        max_date = cb_df.agg(F.max('visit_dt')).collect()[0][0]
+
+        #get transaction data
+        tr_df = spark.sql("SELECT visit_dt, store_nbr, visit_nbr, sale_amt_inc_vat, unmeasured_qty, original_cin, mds_fam_id FROM \
+                                         {}.{} WHERE visit_dt >= '{}' AND visit_dt <= '{}' AND mds_fam_id IS NOT NULL"\
+                                        .format(self.information_db, self.odl_trans, min_date, max_date))
+        tr_df = tr_df.distinct()
+
+        tr_df = tr_df.withColumn("basket_id", F.concat((F.col("visit_dt").cast(StringType())), (F.col("store_nbr")),
+                                                       (F.col("visit_nbr"))))
+        tr_df = tr_df.withColumn("basket_id", F.regexp_replace('basket_id', '-', '').cast(DecimalType(38, 0)))
+
+        #get calendar data
+        cal_df = spark.sql("SELECT asda_wk_nbr, day_date FROM {}.{} WHERE day_date >= '{}' AND day_date <= '{}' ".format(self.staging_db, self.raw_cal, min_date, max_date))
+
+        tr_df = tr_df.join(cal_df, on=[tr_df.visit_dt == cal_df.day_date], how='INNER').repartition(100)
+
+        tr_cb_df = cb_df.join(tr_df, on=['basket_id'], how='INNER').drop(tr_df.visit_nbr).drop(tr_df.store_nbr).drop(tr_df.visit_dt).drop(tr_df.day_date).repartition(1500)
+        tr_cb_df.createOrReplaceTempView('data')
+
+        dt_df = spark.sql("SELECT asda_wk_nbr, row_number() over(order by asda_wk_nbr DESC) as row_num FROM data group by asda_wk_nbr ")
+        dt_df = dt_df.filter(F.col('row_num').between(1, 13))
+
+        tr_cb_df = tr_cb_df.join(dt_df, on=['asda_wk_nbr'], how='INNER').drop(dt_df.asda_wk_nbr)
+
+        #get dim_item_hierarchy data
+        dih_df = spark.sql("SELECT distinct catg_desc, catg_id, dept_desc, dept_nbr, mdse_catg_nbr, mdse_catg_desc, fineline_nbr, fineline_desc, \
+                                prod_desc, mds_fam_id, vendor_nm FROM {}.{} ".format(self.information_db, self.odl_dim_item))
+
+
+        final_df = tr_cb_df.join(dih_df, on=['mds_fam_id'], how='INNER').repartition(100)
+        final_df = final_df.drop(dih_df.mds_fam_id).distinct()
+
+        spark.conf.set("spark.sql.shuffle.partitions", 100)
+        final_df.write.partitionBy('asda_wk_nbr').mode('overwrite').saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+ts = rptCustPenTot()
+ts.run()

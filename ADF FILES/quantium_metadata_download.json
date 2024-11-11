@@ -1,0 +1,170 @@
+{
+	"name": "quantium_metadata_download",
+	"properties": {
+		"description": "qpromo_item_brandoverride.parquet processing",
+		"activities": [
+			{
+				"name": "landingFailureAlert",
+				"type": "WebActivity",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"url": {
+						"value": "@pipeline().globalParameters.laUrl_genericIngestionFrameworkAlerting",
+						"type": "Expression"
+					},
+					"connectVia": {
+						"referenceName": "AutoResolveIntegrationRuntime",
+						"type": "IntegrationRuntimeReference"
+					},
+					"method": "POST",
+					"body": {
+						"value": "{\n'ceEmail': '@{variables('CeEmail')}',\n'subject' : '@{variables('Subject')}',\n'DataFactoryName'  :  '@{pipeline().DataFactory}',\n'Pipeline' :  '@{pipeline().Pipeline}',\n'PipelineRunID' :  '@{pipeline().RunId}',\n'PipelineTriggerID' :  '@{pipeline().TriggerId}',\n\n'sourceTime': 'utcnow()',\n'stage': 'process Item Brand Override' \n'}'\n}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "01_getFileList",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SqlDWSource",
+						"sqlReaderQuery": "select fileName\nfrom admin.quantiuminboundlog where ingestionstatus = 1",
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "ds_quantium_inbound",
+						"type": "DatasetReference"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "FileList",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "01_getFileList",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "fileList",
+					"value": {
+						"value": "@activity('01_getFileList').output",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "02_downloadBlobs",
+				"type": "DatabricksNotebook",
+				"dependsOn": [
+					{
+						"activity": "FileList",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/3rdparty/quantium/downloadblobsv2",
+					"baseParameters": {
+						"fileList": {
+							"value": "@variables('fileList')",
+							"type": "Expression"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_dbr_quantium",
+					"type": "LinkedServiceReference"
+				}
+			}
+		],
+		"parameters": {
+			"askID": {
+				"type": "string",
+				"defaultValue": "i1829"
+			},
+			"entityName": {
+				"type": "string",
+				"defaultValue": "cdd_raw_quantium_item_brand_override"
+			},
+			"sourceID": {
+				"type": "string",
+				"defaultValue": "quantium"
+			},
+			"sourceFilePath": {
+				"type": "String",
+				"defaultValue": "processed_files/qpromo_item_brandoverride.parquet"
+			}
+		},
+		"variables": {
+			"CeEmail": {
+				"type": "String"
+			},
+			"Subject": {
+				"type": "String"
+			},
+			"database": {
+				"type": "String"
+			},
+			"sourceTime": {
+				"type": "String"
+			},
+			"srcFileName": {
+				"type": "String"
+			},
+			"sourceFileCount": {
+				"type": "String"
+			},
+			"sourceRecordCount": {
+				"type": "String"
+			},
+			"sourceTotalFileBytes": {
+				"type": "String"
+			},
+			"fileList": {
+				"type": "Array"
+			}
+		},
+		"folder": {
+			"name": "quantium"
+		},
+		"annotations": []
+	}
+}

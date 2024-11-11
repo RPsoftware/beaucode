@@ -1,0 +1,29 @@
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+--odl_redesign_customer_basket
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+--1) query to extract aggregated results 
+SELECT visit_dt, count(basket_id) as basket_ids, count(unified_cust_id) as ucids
+FROM gb_customer_data_domain_odl.cdd_odl_redesign_customer_basket
+GROUP BY visit_dt
+
+--2) paste results into spreadsheet, get percentage of ucids. 
+
+--3) compare count of basket_ids with transaction_ids count. They should match.
+
+--4) query to aggregate results from the current customer_basket table 
+SELECT visit_dt, count(basket_id) as basket_ids, count(unified_cust_id) as ucids
+FROM (SELECT CAST (CONCAT(TRANSLATE(CAST( visit_dt AS VARCHAR(10)),'-',''), store_nbr, visit_nbr) AS decimal(38,0)) 
+			AS basket_id, visit_dt, unified_cust_id FROM gb_customer_data_domain_odl.cdd_odl_customer_basket) cb
+GROUP BY visit_dt
+
+--5) paste results into spreadsheet and get percentage of ucids.
+
+--6) compare percentage of ucids from redesign_customer_basket and customer_basket - the redesign should have an equal or higher percentage.
+
+--7) send results to Simon
+
+
+
+

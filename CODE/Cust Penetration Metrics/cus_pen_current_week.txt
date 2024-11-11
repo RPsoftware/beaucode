@@ -1,0 +1,159 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+from pyspark.sql.types import DecimalType
+
+class rptCustPenTot:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["cdd_odl_customer_penetration"] #needs adding to YAML file
+        self.target_table = 'cdd_odl_customer_penetration'
+
+        # Source Databases
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.report_db = cnt["Customer_Staging_Mart"]["cdd_rpt_database"]["extraction_database"]
+
+        # Src Tables
+        self.odl_s1 = 'cdd_odl_cus_pen_stage1'
+        self.odl_uc = 'cdd_odl_redesign_unified_customer'
+
+    def run(self):
+        print("****************START**************************")
+
+        #get unified_cust_id and count of unified_cust_id
+        uc_df = spark.sql("SELECT COUNT(DISTINCT unified_cust_id) as uc_count FROM {}.{} WHERE is_active_cip = 'Y' ".format(self.information_db, self.odl_uc))
+        uc_count = uc_df.agg(F.max('uc_count')).collect()[0][0]
+
+        stage2_df = spark.sql("SELECT * FROM {}.{} where row_num < 13 ".format(self.information_db, self.odl_s1)).repartition(100)
+        max_date = stage2_df.agg(F.max('asda_wk_nbr')).collect()[0][0]
+
+        data1_df = stage2_df.select(F.col('asda_wk_nbr'), \
+                                    F.lit('0').alias('hierarchy_level_id'), \
+                                    F.lit('total').alias('hierarchy_level'), \
+                                    F.lit('').alias('hierarchy_level_name'), \
+                                    F.col('basket_id'), \
+                                    F.col('unified_cust_id'), \
+                                    F.col('sale_amt_inc_vat'), \
+                                    F.col('unmeasured_qty'), \
+                                    F.col('row_num')).repartition(100)
+        total_df = self.getData1(data1_df, uc_count, max_date)
+
+        data1_df = stage2_df.select(F.col('asda_wk_nbr'), \
+                                    F.col('catg_id').alias('hierarchy_level_id'), \
+                                    F.lit('category').alias('hierarchy_level'), \
+                                    F.col('catg_desc').alias('hierarchy_level_name'), \
+                                    F.col('basket_id'), \
+                                    F.col('unified_cust_id'), \
+                                    F.col('sale_amt_inc_vat'), \
+                                    F.col('unmeasured_qty'), \
+                                    F.col('row_num')).repartition(100)
+        cat_df = self.getData1(data1_df, uc_count, max_date)
+       
+        data1_df = stage2_df.select(F.col('asda_wk_nbr'), \
+                                    F.col('dept_nbr').alias('hierarchy_level_id'), \
+                                    F.lit('department').alias('hierarchy_level'), \
+                                    F.col('dept_desc').alias('hierarchy_level_name'), \
+                                    F.col('basket_id'), \
+                                    F.col('unified_cust_id'), \
+                                    F.col('sale_amt_inc_vat'), \
+                                    F.col('unmeasured_qty'), \
+                                    F.col('row_num')).repartition(100)
+        dept_df = self.getData1(data1_df, uc_count, max_date)
+
+        data1_df = stage2_df.select(F.col('asda_wk_nbr'), \
+                                    F.col('mdse_catg_nbr').alias('hierarchy_level_id'), \
+                                    F.lit('merchandising_category').alias('hierarchy_level'), \
+                                    F.col('mdse_catg_desc').alias('hierarchy_level_name'), \
+                                    F.col('basket_id'), \
+                                    F.col('unified_cust_id'), \
+                                    F.col('sale_amt_inc_vat'), \
+                                    F.col('unmeasured_qty'), \
+                                    F.col('row_num')).repartition(100)
+        mdse_df = self.getData1(data1_df, uc_count, max_date)
+
+        data1_df = stage2_df.select(F.col('asda_wk_nbr'), \
+                                    F.col('fineline_nbr').alias('hierarchy_level_id'), \
+                                    F.lit('product_profile_group').alias('hierarchy_level'), \
+                                    F.col('fineline_desc').alias('hierarchy_level_name'), \
+                                    F.col('basket_id'), \
+                                    F.col('unified_cust_id'), \
+                                    F.col('sale_amt_inc_vat'), \
+                                    F.col('unmeasured_qty'), \
+                                    F.col('row_num')).repartition(100)
+        prod_prfl_df = self.getData1(data1_df, uc_count, max_date)
+
+        data1_df = stage2_df.select(F.col('asda_wk_nbr'), \
+                                    F.col('original_cin').alias('hierarchy_level_id'), \
+                                    F.lit('product').alias('hierarchy_level'), \
+                                    F.col('prod_desc').alias('hierarchy_level_name'), \
+                                    F.col('basket_id'), \
+                                    F.col('unified_cust_id'), \
+                                    F.col('sale_amt_inc_vat'), \
+                                    F.col('unmeasured_qty'), \
+                                    F.col('row_num')).repartition(100)
+        prod_df = self.getData1(data1_df, uc_count, max_date)
+
+        final_df = total_df.union(cat_df).repartition(100)
+        final_df = final_df.union(dept_df).repartition(100)
+        final_df = final_df.union(mdse_df).repartition(100)
+        final_df = final_df.union(prod_prfl_df).repartition(100)
+        final_df = final_df.union(prod_df).repartition(100)
+
+        final_df.write.partitionBy('hierarchy_level').mode('overwrite').saveAsTable("{}.{}".format(self.information_db, self.target_table))
+
+        print("*********************END*******************************************************")
+
+    @staticmethod
+    def getData1 (data1_df, uc_count, max_date):
+
+        week1_df = data1_df.filter(F.col('row_num') == 1).drop('row_num')
+
+        week1_df = week1_df.groupBy('asda_wk_nbr', 'hierarchy_level', 'hierarchy_level_id', 'hierarchy_level_name')\
+                                .agg(F.countDistinct('basket_id').alias('tr_basket_id_count'),  \
+                                F.countDistinct('unified_cust_id').alias('customer_count'), \
+                                F.sum('sale_amt_inc_vat').alias('total_sales'), \
+                                F.sum('unmeasured_qty').alias('tr_unm_qty')).repartition(100)
+
+        week1_df = week1_df.select(F.col('asda_wk_nbr'), \
+                                    F.col('hierarchy_level'), \
+                                    F.col('hierarchy_level_id'),  \
+                                    F.col('hierarchy_level_name'), \
+                                    ((F.col('customer_count') * 100) / uc_count).cast(DecimalType(38,4)).alias('customer_penetration'), \
+                                    F.col('customer_count'), \
+                                    (F.col('total_sales') / F.col('customer_count')).cast(DecimalType(38,2)).alias('spend_per_customer'), \
+                                    (F.col('tr_basket_id_count') / F.col('customer_count')).cast(DecimalType(38,2)).alias('visits_per_customer'), \
+                                    (F.col('total_sales') / F.col('tr_unm_qty')).alias('average_unit_price')).repartition(100)
+
+        week1_df = week1_df.withColumn('report_period_week', F.lit('1'))
+
+        # get 12 week rolling total
+
+        week12_df = data1_df.groupBy('hierarchy_level', 'hierarchy_level_id', 'hierarchy_level_name')\
+                                .agg(F.countDistinct('basket_id').alias('tr_basket_id_count'),  \
+                                F.countDistinct('unified_cust_id').alias('customer_count'), \
+                                F.sum('sale_amt_inc_vat').alias('total_sales'), \
+                                F.sum('unmeasured_qty').alias('tr_unm_qty')).drop('row_num')
+
+        week12_df = week12_df.withColumn('asda_wk_nbr', F.lit(max_date)).repartition(100)
+
+        week12_df = week12_df.select(F.col('asda_wk_nbr'), \
+                                    F.col('hierarchy_level'), \
+                                    F.col('hierarchy_level_id'),  \
+                                    F.col('hierarchy_level_name'), \
+                                   ((F.col('customer_count') * 100) / uc_count).cast(DecimalType(38,4)).alias('customer_penetration'), \
+                                    F.col('customer_count'), \
+                                    (F.col('total_sales') / F.col('customer_count')).cast(DecimalType(38,2)).alias('spend_per_customer'), \
+                                    (F.col('tr_basket_id_count') / F.col('customer_count')).cast(DecimalType(38,2)).alias('visits_per_customer'), \
+                                    (F.col('total_sales') / F.col('tr_unm_qty')).alias('average_unit_price')).repartition(100)
+        week12_df = week12_df.withColumn('report_period_week', F.lit('12'))
+
+        data1_df = week1_df.union(week12_df).repartition(100)
+
+        return(data1_df)
+
+ts = rptCustPenTot()
+ts.run()

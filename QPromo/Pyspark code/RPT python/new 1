@@ -1,0 +1,10 @@
+SELECT cons_item_nbr, h.original_cin, mds_fam_id,item_nbr,picker_desc
+,CASE WHEN item_desc_1 = signing_desc then trim(CONCAT(item_desc_1,' ',coalesce(color_desc,''),' ',coalesce(size_desc,'')))
+ ELSE trim(CONCAT(item_desc_1,' ',signing_desc)) END as concat_item_desc
+,CASE WHEN prod_disp_nm IS NULL THEN NULL
+   WHEN prod_disp_nm is not NULL and prod_size_qty = 'EACH' THEN CASE WHEN brand_nm_gp is NULL THEN prod_disp_nm
+																	  ELSE CONCAT(brand_nm_gp,' ',prod_disp_nm) END
+   WHEN prod_disp_nm is not NULL and prod_size_qty != 'EACH' THEN CASE WHEN brand_nm_gp is NULL THEN CONCAT(prod_disp_nm,' ',coalesce(prod_size_qty,''))
+																	   ELSE CONCAT(brand_nm_gp,' ',prod_disp_nm,' ',coalesce(prod_size_qty,'')) END
+   END as concat_prod_desc_gp
+                    ,item_desc_1

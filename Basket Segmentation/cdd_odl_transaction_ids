@@ -1,0 +1,88 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+from datetime import datetime, timedelta
+import pyspark.sql.functions as F
+from pyspark.sql.types import  DecimalType, StringType
+
+class transID:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_transaction_ids"]
+		self.target_table = 'cdd_odl_transaction_ids'
+        
+		# Source Databases
+        self.staging_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        
+        # Src Tables
+        #self.store_visit = cnt["Customer_Staging_Mart"]["csm_tables"]["cdd_raw_store_visit"]
+        self.store_visit = 'cdd_raw_store_visit'
+        #self.store_trans = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_store_transaction"]
+        self.store_trans = 'cdd_raw_store_transaction'
+        #self.store_tender = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_store_visit_tender"]
+        self.store_tender = 'cdd_raw_store_visit_tender'
+        #self.eic = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_eic_order_details"]
+        self.eic = 'cdd_raw_eic_order_details'
+        #self.ghs = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_ghs_order"]
+        self.ghs = 'cdd_raw_ghs_order'
+        #self.sng = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_sng_visit"]
+        self.sng = 'cdd_raw_sng_visit'
+        #self.sng_matching = cnt["Customer_Staging_Mart"] ["cdd_odl_tables"] ["cdd_odl_sng_matching"]
+        self.sng_matching = 'cdd_odl_sng_matching'
+     
+    def run(self):
+        # 1 - pull data from sources
+
+        store_visit_df = spark.sql("SELECT visit_dt, visit_nbr, store_nbr, visit_ts, trans_nbr, reg_nbr, visit_subtype_cd FROM {}.{}".format(self.staging_db,self.store_visit))
+
+        store_trans_df = spark.sql("SELECT visit_date, visit_nbr, store_nbr, tc_nbr FROM {}.{}".format(self.staging_db,self.store_trans))
+
+        store_tender_df = spark.sql("SELECT store_nbr, visit_dt, visit_nbr, acct_nbr, tndr_amt, tndr_type_cd, debit_rq_tm FROM {}.{}".format(self.staging_db,self.store_tender))
+
+        eic_df = spark.sql("SELECT order_id, tc_num FROM {}.{}".format(self.staging_db,self.eic))
+
+        ghs_df = spark.sql("SELECT cust_id, web_order_id FROM {}.{}".format(self.staging_db,self.ghs))
+
+        sng_df = spark.sql("SELECT cart_id, trans_cd FROM {}.{}".format(self.staging_db,self.sng))
+
+        sng_matching_df = spark.sql("SELECT store_nbr, visit_dt, visit_nbr, cart_id FROM {}.{}".format(self.information_db,self.sng_matching))
+
+
+        # 2 add derived basket_id to store_visit and store_tender
+     
+		store_visit_df = store_visit_df.withColumn("basket_id", F.concat((F.col("visit_dt").cast(StringType())), (F.col("store_nbr")), (F.col("visit_nbr"))))
+        store_visit_df = store_visit_df.withColumn("basket_id", F.regexp_replace('basket_id', '-', '').cast(DecimalType(38,0)))
+
+        store_trans_df = store_trans_df.withColumn("basket_id", F.concat((F.col("visit_date").cast(StringType())), (F.col("store_nbr")), (F.col("visit_nbr"))))
+		store_trans_df = store_trans_df.withColumn("basket_id"), F.regexp_replace('basket_id', '-', '').cast(DecimalType(38,0)))
+		
+		store_tender_df = store_tender_df.filter("tndr_type_cd" == '8')
+		store_tender_df = store_tender_df.groupBy('visit_dt', 'store_nbr', 'visit_nbr').agg(F.max('tndr_amt').alias('tndr_amt')
+		store_tender_df = store_tender_df.groupBy('visit_dt', 'store_nbr', 'visit_nbr', 'tndr_amt').agg(F.min('debit_rq_tm')
+		store_tender_df = store_tender_df.select('visit_dt', store_nbr', visit_nbr', 'acct_nbr')
+
+        # 3 create final output dataframe
+
+		# Variables used for channel_id derivation
+        reg_nbr = 82
+        subtype_li = [89,152,201,202]
+        def_channel_id = 1
+
+        # Dates used for cart_id
+        before_date = '2021-12-06'
+        after_date = '2021-12-05'
+		
+        final_df = store_visit_df.join(store_trans_df, on=["basket_id"], how="INNER").drop(store_trans_df.basket_id).drop(store_trans_df.visit_nbr).drop(store_trans_df.store_nbr).drop(store_trans_df.visit_date)
+		final_df = final_df.withColumn("channel_id", F.when(F.col('reg_nbr') == reg_nbr, 2).when(F.col('visit_subtype_cd').isin(subtype_li), 3).otherwise(1))
+		final_df = final_df.join(store_tender_df, on=["visit_dt", "store_nbr", "visit_nbr"], how='LEFT').drop(store_tender.visit_dt).drop(store_tender.store_nbr).drop(store_tender.visit_nbr)
+        
+		final_df = final_df.select('basket_id', 'visit_dt', 'store_nbr', 'visit_nbr', 'visit_ts', 'trans_nbr', 'reg_nbr', 'visit_subtype_cd',channel_id', 'tc_nbr', (F.col('acct_nbr').alias('lead_xref'))
+		
+		final_df.write.partitionBy('visit_dt').mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+		
+ts = transID()
+ts.run()

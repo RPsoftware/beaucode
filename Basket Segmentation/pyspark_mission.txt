@@ -1,0 +1,574 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+
+
+class pos_seg_mission:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        # self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        # self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_pos_seg_mission"]
+        # Config Tables
+        # self.configChoicescoeff_table = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["cdd_odl_pos_seg_choices_coefficients"]
+        # scTable
+        # self.src_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["cdd_odl_pos_transaction_dept"]
+
+    def run(self):
+        print("****************Execution Start****************")
+
+        # get data from pos_transactions_dept from previous 3 years, group by store_nbr,visit_nbr,visit_dt and sum values
+        df_stage1 = spark.sql('''
+                              SELECT basket_id, store_nbr, visit_nbr, visit_dt, MAX(load_ts) AS load_ts,
+CAST(SUM(bulk) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS bulk,
+CAST(SUM(high_price) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS pr_high,
+CAST(SUM(low_price) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS pr_low,
+CAST(SUM(mid_price) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS pr_mid,
+CAST(SUM(own_label_smartprice) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_asda_smartprice,
+CAST(SUM(own_label_extraspecial) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_asda_extraspecial,
+CAST(SUM(own_label_goodforyou) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_asda_goodforyou,
+CAST(SUM(own_label_freefrom) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_asda_freefrom,
+CAST(SUM(own_label_standard) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_asda_standard,
+CAST(SUM(own_label_asdaother) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_asda_other,
+CAST(SUM(own_label) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_own_label,
+CAST(SUM(branded) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_branded,
+CAST(SUM(organic) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS organic,
+CAST(SUM(own_label_choice) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_own_label_choice,
+CAST(SUM(branded_choice) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS br_branded_choice,
+CAST(SUM(essentials_core) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ess_core,
+CAST(SUM(essentials_marginal) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ess_marginal,
+CAST(SUM(essentials_niche) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ess_niche,
+CAST(SUM(essentials_infrequent) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ess_infrequent,
+CAST(SUM(essentials_staples) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ess_staples,
+CAST(SUM(essentials_occasional) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ess_occasional,
+CAST(SUM(baby_new_born) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_baby_newborn,
+CAST(SUM(toddler) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_toddler,
+CAST(SUM(adventurous) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_adventurous,
+CAST(SUM(children) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_children,
+CAST(SUM(convenience_readymeals) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_conv_ready_meals,
+CAST(SUM(convenience_timesaving) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_conv_time_saving,
+CAST(SUM(healthy) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_healthy,
+CAST(SUM(high_calorie) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_high_calorie,
+CAST(SUM(low_calorie) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_low_calorie,
+CAST(SUM(scratch_cooking) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_scratch_cooking,
+CAST(SUM(traditional) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_traditional,
+CAST(SUM(vegetarian) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_vegetarian,
+CAST(SUM(ethical) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS sno_ethical,
+CAST(SUM(st_foodtogo) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ftg_foodtogo,
+CAST(SUM(bws) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_bws,
+CAST(SUM(ambient_drinks) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_ambient_drinks,
+CAST(SUM(health_beauty) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_health_and_beauty,
+CAST(SUM(ambient_food) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_ambient_food,
+CAST(SUM(baby) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_baby,
+CAST(SUM(pet_dog) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_pet_dog,
+CAST(SUM(pet_cat) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_pet_cat,
+CAST(SUM(pet_other) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_pet_other,
+CAST(SUM(household_cleaning) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_household_cleaning,
+CAST(SUM(confectionery_cakes) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_conf_cakes_biscuits,
+CAST(SUM(fresh_meals_deli) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_fresh_meals_deli,
+CAST(SUM(home_leisure) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_home_and_leisure,
+CAST(SUM(bakery) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_bakery,
+CAST(SUM(fresh_produce) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_fresh_produce,
+CAST(SUM(dairy_other) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_dairy_other,
+CAST(SUM(dairy_milk_cream) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_dairy_milk_cream,
+CAST(SUM(fresh_mfp) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_fresh_meat_fish_poultry,
+CAST(SUM(frozen) AS DECIMAL(10,5)) / CAST(SUM(item_qty) AS DECIMAL(10,5)) AS ac_frozen
+FROM  gb_customer_data_domain_odl.cdd_odl_pos_transaction_dept d
+where visit_dt = '2021-10-10'
+GROUP by basket_id, store_nbr, visit_nbr, visit_dt''')
+
+        # create temp table for STAGE 1 requirements
+        df_stage1.createOrReplaceTempView("pos_seg_dept")
+
+        df_mission_coeff = spark.sql(
+            '''SELECT coefficient_id, coefficient FROM gb_customer_data_domain_odl.cdd_odl_pos_seg_mission_config_coefficients''')
+
+        df_mission_coeff.createOrReplaceTempView("coeff_table")
+
+        df_stage2 = spark.sql('''SELECT ta.store_nbr, ta.visit_nbr, ta.visit_dt, ta.load_ts, tr.triptype_id, ta.ftg_foodtogo, 
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@icf_acf')) 
+        AS  i_convenience_frozen, 
+		(SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ie_acf')) 
+        AS  i_essentials, 
+	    (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ifc_acf')) 
+        AS  i_fresh_cooking,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ig_acf')) 
+        AS  i_general,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ir_acf')) 
+        AS  i_replenish,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsb_acf')) 
+        AS  bs_booze, 
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsc_acf')) 
+        AS  bs_convenience_frozen, 
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bse_acf')) 
+        AS  bs_essentials,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsf_acf')) 
+        AS  bs_fresh_cooking,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsg_acf')) 
+        AS  bs_general,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@bsr_acf')) 
+        AS  bs_replenish,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blb_acf')) 
+        AS  bl_booze,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blcf_acf')) 
+        AS  bl_convenience_frozen,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@ble_acf')) 
+        AS  bl_essentials,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blfc_acf')) 
+        AS  bl_fresh_cooking,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blg_acf')) 
+        AS  bl_general,
+        		(SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@blr_acf')) 
+        AS  bl_replenish, 
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsg_acf')) 
+        AS  ts_general,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tsr_acf')) 
+        AS  ts_replenish,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmg_acf')) 
+        AS  tm_general,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tmr_acf')) 
+        AS  tm_replenish,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlg_acf')) 
+        AS  tl_general,
+        (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_c') + 
+        (ta.ess_core * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_ec')) + 
+        (ta.ess_staples * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_es')) + 
+        (ta.sno_conv_ready_meals * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_snocrm')) + 
+        (ta.sno_scratch_cooking * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_snosc')) + 
+        (ta.ac_bws * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_acbws')) + 
+        (ta.ac_health_and_beauty * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_achab')) + 
+        (ta.ac_ambient_food * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_acaf')) + 
+        (ta.ac_household_cleaning * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_achc')) + 
+        (ta.ac_home_and_leisure * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_achal')) + 
+        (ta.ac_bakery * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_acb')) + 
+        (ta.ac_fresh_produce * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_acfp')) + 
+        (ta.ac_dairy_other * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_acdo')) + 
+        (ta.ac_dairy_milk_cream * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_acdmc')) + 
+        (ta.ac_fresh_meat_fish_poultry * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_acfmfp')) +
+        (ta.ac_frozen * (SELECT coefficient FROM coeff_table WHERE coefficient_id = '@tlr_acf')) 
+        AS  tl_replenish 
+        FROM pos_seg_dept as ta 
+        LEFT JOIN gb_customer_data_domain_odl.cdd_odl_pos_seg_trip as tr ON ta.store_nbr == tr.store_nbr AND ta.visit_nbr == tr.visit_nbr AND ta.visit_dt == tr.visit_dt''')
+
+        df_stage2.createOrReplaceTempView("values_stage2")
+
+        df_output = spark.sql('''SELECT CAST(CONCAT(REPLACE(CAST(visit_dt AS VARCHAR(10)),'-',''),store_nbr,visit_nbr) AS decimal(38,0)) AS basket_id,
+                                                                                 store_nbr, visit_dt, visit_nbr, load_ts, triptype_id, i_convenience_frozen, i_essentials, i_fresh_cooking, i_general, i_replenish,
+                                                                                 bs_booze, bs_convenience_frozen, bs_essentials, bs_fresh_cooking, bs_general,bs_replenish, bl_booze, bl_convenience_frozen,
+                                                                                 bl_essentials, bl_fresh_cooking, bl_general, bl_replenish, ts_general, ts_replenish, tm_general, tm_replenish, tl_general, tl_replenish,
+        CASE WHEN ftg_foodtogo >= (SELECT coefficient FROM gb_customer_data_domain_odl.cdd_odl_pos_seg_mission_config_coefficients WHERE coefficient_id = '@ftg_ftg') THEN 7
+        WHEN triptype_id = 99 THEN 99
+        WHEN triptype_id < 5 THEN 98
+        WHEN triptype_id = 5 THEN
+        (CASE WHEN
+        (i_convenience_frozen > i_essentials) AND
+        (i_convenience_frozen > i_fresh_cooking ) AND
+        (i_convenience_frozen > i_general) AND
+        (i_convenience_frozen > i_replenish) THEN 9
+        WHEN (i_essentials > i_fresh_cooking ) AND
+        (i_essentials > i_general ) AND
+        (i_essentials > i_replenish) THEN 11
+        WHEN (i_fresh_cooking > i_general ) AND
+        (i_fresh_cooking > i_replenish) THEN 8
+        WHEN (i_general > i_replenish) THEN 10
+        ELSE 4
+        end)
+        WHEN triptype_id = 6 THEN
+        (CASE
+        WHEN (bs_booze > bs_convenience_frozen) AND
+        (bs_booze > bs_essentials) AND
+        (bs_booze > bs_fresh_cooking) AND
+        (bs_booze > bs_general) AND
+        (bs_booze > bs_replenish) THEN 3
+        WHEN (bs_convenience_frozen > bs_essentials) AND
+        (bs_convenience_frozen > bs_fresh_cooking) AND
+        (bs_convenience_frozen > bs_general) AND
+        (bs_convenience_frozen > bs_replenish) THEN 9
+        WHEN (bs_essentials > bs_fresh_cooking) AND
+        (bs_essentials > bs_general) AND
+        (bs_essentials > bs_replenish) THEN 6
+        WHEN (bs_fresh_cooking > bs_general) AND
+        (bs_fresh_cooking > bs_replenish) THEN 8
+        WHEN (bs_general > bs_replenish) THEN 5
+        ELSE 4
+        end)
+        WHEN triptype_id = 7 THEN
+        (CASE
+        WHEN (bl_booze > bl_convenience_frozen) AND
+        (bl_booze > bl_essentials) AND
+        (bl_booze > bl_fresh_cooking) AND
+        (bl_booze > bl_general) AND
+        (bl_booze > bl_replenish) THEN 3
+        WHEN (bl_convenience_frozen > bl_essentials) AND
+        (bl_convenience_frozen > bl_fresh_cooking) AND
+        (bl_convenience_frozen > bl_general) AND
+        (bl_convenience_frozen > bl_replenish) THEN 9
+        WHEN (bl_essentials > bl_fresh_cooking) AND
+        (bl_essentials > bl_general) AND
+        (bl_essentials > bl_replenish) THEN 6
+        WHEN (bl_fresh_cooking > bl_general) AND
+        (bl_fresh_cooking > bl_replenish) THEN 8
+        WHEN (bl_general > bl_replenish) THEN 5
+        ELSE 4
+        end)
+        WHEN triptype_id = 8 THEN
+        (CASE WHEN (ts_general > ts_replenish) THEN 2
+        ELSE 1
+        end)
+        WHEN triptype_id = 9 THEN
+        (CASE   WHEN (tm_general > tm_replenish) THEN 2
+        ELSE 1
+        end)
+        WHEN triptype_id = 10 THEN
+        (CASE   WHEN (tl_general > tl_replenish) THEN 2
+        ELSE 1
+        end)
+        end AS low_mission_id_6
+                                                                                 FROM values_stage2''')
+
+        # Save df_pos_seg_mission to a Hive table
+        spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+
+        df_output.write.mode("overwrite").insertInto("{}.{}".format(self.target_db, self.target_table), overwrite=True)
+
+        # df_output.write.partitionBy('visit_dt').mode("overwrite").saveAsTable(
+        #    "gb_customer_data_domain_odl.cdd_odl_pos_seg_mission")
+
+        print("************** SPARK JOB complete****************")
+
+
+ts = pos_seg_mission()
+ts.run()

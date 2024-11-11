@@ -1,0 +1,34 @@
+API KEY :3f7ddb95-6375-3a96-b61d-e9142245a280
+
+------------------------------------------
+ONLY TO BE USED FOR FUNDING AND COGS DATA 
+------------------------------------------
+
+To push file to dev blob storage from /user/svc_uk_cust_rdl/extracts/qpromo/: 
+
+1) Request a SAS Token in Hadoop
+
+curl --location --request POST "https://api.quantium.com/storage/uk/api/v1/token" --header "accept: application/json" --header "Authorization: ApiKey 3f7ddb95-6375-3a96-b61d-e9142245a280" --header "content-length: 0"
+
+2) Recieve response in format below 
+
+{"vendorName":"promos",
+"storageContainerName":"promos",
+"sasToken":"sv=2020-04-08&se=2023-07-11T19%3A38%3A14Z&sr=c&sp=rwdl&sig=ZSXzharVB9oyYwMjVQYg3624vE25jTTL7v8CH1a%2BHhw%3D",
+"listContentsUrl":"https://asdaprdeu2public1dtsa.blob.core.windows.net/promos?sv=2020-04-08&se=2023-07-11T19%3A38%3A14Z&sr=c&sp=rwdl&sig=ZSXzharVB9oyYwMjVQYg3624vE25jTTL7v8CH1a%2BHhw%3D&restype=container&comp=list"}
+
+3)Add the SAS Token to the distcp string below and update the file to push:
+
+export DISTCP_PROXY_OPTS="-Dhttps.proxyHost=sysproxy.wal-mart.com -Dhttps.proxyPort=8080"
+hadoop distcp \
+-Dmapreduce.map.java.opts="$DISTCP_PROXY_OPTS" \
+-Dmapreduce.reduce.java.opts="$DISTCP_PROXY_OPTS" \
+-Dmapreduce.map.memory.mb=8192 -Dmapreduce.reduce.memory.mb=8192 \
+-Dmapred.job.queue.name=default \
+-Dfs.azure.sas.promos.asdaprdeu2public1dtsa.blob.core.windows.net='sv=2020-04-08&se=2023-07-11T19%3A38%3A14Z&sr=c&sp=rwdl&sig=ZSXzharVB9oyYwMjVQYg3624vE25jTTL7v8CH1a%2BHhw%3D' \
+/user/svc_uk_cust_rdl/extracts/qpromo/cogs_20230711.parquet \
+wasbs://promos@asdaprdeu2public1dtsa.blob.core.windows.net/
+
+4) When job has completed, check the contents of the blob storage in a browser:
+
+https://asdaprdeu2public1dtsa.blob.core.windows.net/promos?sv=2020-04-08&se=2023-05-22T12%3A59%3A30Z&sr=c&sp=rwdl&sig=aFOme9QjwnP99wYvZ0A5GADI86wcaaVUnoC6uY79zeY%3D

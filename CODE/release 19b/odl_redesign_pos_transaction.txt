@@ -1,0 +1,193 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+import subprocess
+from datetime import datetime, timedelta
+from pyspark.sql.types import StringType, DecimalType
+
+class posTransactionOdl:
+
+    def __init__(self):
+        """
+                Assigning Variable from config file
+        """
+        # Store visit scan
+        self.staging_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.visit_scan_table = cnt["Customer_Staging_Mart"]["csm_tables"]["fact_store_visit_scan"]
+        # Store Dimension
+        self.store_table = cnt["Customer_Staging_Mart"]["csm_tables"]["dim_store"]
+        # Store visit ucid
+        #self.visit_ucid_table = cnt["Customer_Staging_Mart"]["csm_tables"]["fact_store_visit_ucid"]
+        # Store visit
+        self.store_visit = 'cdd_raw_store_visit'
+        # Store visit tender ucid
+        #self.visit_tender_ucid = cnt["Customer_Staging_Mart"]["csm_tables"]["fact_store_visit_tender"]
+        # Store visit tender
+        self.visit_tender = 'cdd_raw_store_visit_tender'
+        # item hierarchy for original cin
+        self.item_hierarchy = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdl_odl_dim_item_hierarchy"]
+        # Fact Promo Daily
+        self.promo_daily = cnt["Customer_Staging_Mart"]["csm_tables"]["promo_daily"]
+        # Transaction_ids
+        self.transaction_ids = 'cdd_odl_transaction_ids'
+
+
+        # ODL Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_pos_transaction"]
+        self.target_table = 'cdd_odl_redesign_pos_transaction'
+
+
+        self.ld_sql_txt = '''SELECT sc.visit_nbr,sc.store_nbr,sc.visit_dt,CAST(SUBSTR(RIGHT(sc.upc_nbr,4),1,3) AS INTEGER) as linksave_offer
+                                    ,SUM(CASE WHEN vt.reg_nbr IN (82) THEN -sc.vat_sell_price_amt ELSE sc.vat_sell_price_amt END) as lsdiscount
+                                    FROM sc
+                                    INNER JOIN vt ON sc.visit_nbr = vt.visit_nbr AND sc.store_nbr = vt.store_nbr AND sc.visit_dt = vt.visit_dt
+                                    WHERE sc.linksave_item_ind = 1 and sc.scan_type !=2
+                                    GROUP BY  sc.visit_nbr,sc.store_nbr,sc.visit_dt,CAST(SUBSTR(RIGHT(sc.upc_nbr,4),1,3) AS INTEGER)'''
+
+        self.lq_sql_txt = '''SELECT visit_nbr,store_nbr,visit_dt,CAST(linksave_offr_id_1/10 AS INTEGER) as linksave_offer,SUM(vat_sell_price_amt) as lsqualify FROM sc
+                             WHERE linksave_offr_id_1 is NOT NULL GROUP BY visit_nbr,store_nbr,visit_dt,CAST(linksave_offr_id_1/10 AS INTEGER)'''
+
+        self.du_sql_txt = '''SELECT ld.visit_nbr,ld.store_nbr,ld.visit_dt,ld.linksave_offer
+                                ,CASE WHEN COALESCE(lq.lsqualify,0)=0 THEN 0 ELSE ld.lsdiscount/lq.lsqualify END AS lsvatinc
+                                FROM ld INNER JOIN lq ON ld.visit_nbr = lq.visit_nbr AND ld.store_nbr = lq.store_nbr AND ld.visit_dt = lq.visit_dt AND ld.linksave_offer = lq.linksave_offer'''
+
+
+        self.mt_sql_txt = '''SELECT store_nbr, visit_dt, visit_nbr, COUNT(*) AS NoOfRows, COUNT(CASE WHEN linksave_item_ind = 1 AND SCAN_TYPE != 2 THEN 1 END) AS NoOfLS1s
+                                FROM sc
+                                GROUP BY store_nbr, visit_dt, visit_nbr HAVING NoOfRows = NoOfLS1s'''
+
+        self.slc_sql_txt = '''SELECT m.mds_fam_id AS m_mds_fam_id,m.item_nbr AS m_item_nbr,m.cons_item_nbr AS m_cons_item_nbr
+                                    ,m.original_cin AS m_original_cin, m.vendor_nbr AS m_vendor_nbr,m.assoc_disc_ind AS m_assoc_disc_ind,m.base_rtl_uom_cd  AS m_base_rtl_uom_cd, m.acct_nbr AS m_acct_nbr
+                                    ,i.mds_fam_id AS i_mds_fam_id,i.item_nbr AS i_item_nbr,i.cons_item_nbr AS i_cons_item_nbr
+                                    ,i.original_cin AS i_original_cin,i.vendor_nbr AS i_vendor_nbr,i.assoc_disc_ind AS i_assoc_disc_ind,i.base_rtl_uom_cd  AS i_base_rtl_uom_cd, i.acct_nbr AS i_acct_nbr
+                                    ,ti.tc_nbr
+                                    ,ti.ghs_order_id
+                                    ,p.asda_promo_type
+                                    ,CASE WHEN vt.reg_nbr = 82 THEN 3
+                                        WHEN vt.oprtr_nbr BETWEEN 9000 AND 9099 THEN 2
+                                        WHEN vt.visit_subtype_cd IN (89,152,201,202) THEN 2
+                                    ELSE 1
+                                    END AS till_type
+                                    ,ti.sng_cart_id
+                                    ,vt.visit_ts,vt.visit_tm,vt.reg_nbr,vt.visit_subtype_cd,vt.oprtr_nbr, vt.void_cmplt_trans_ind
+                                    ,sc.basket_id,sc.visit_nbr,sc.store_nbr,sc.visit_dt,sc.scan_seq_nbr,sc.scan_id,sc.upc_nbr,sc.linksave_item_ind,sc.meas_item_ind,sc.scan_type,sc.crncy_cd
+                                    ,sc.rtn_item_ind,sc.xchng_item_ind,sc.void_item_ind
+                                    ,COALESCE(sc.linksave_offr_id_1,0) AS linksave_offer
+                                    ,sc.scan_cnt
+                                    ,sc.unit_qty
+                                    ,sc.qty_entr_ind
+                                    ,sc.scan_rtl_amt AS rtlsell
+                                    ,sc.vat_sell_price_amt AS vatsell
+                                    ,COALESCE(sc.vat_sell_price_amt * du.lsvatinc,0) AS linksave
+                                    ,CASE WHEN m.assoc_disc_ind = 0 OR i.assoc_disc_ind = 0 THEN 0 ELSE SUM(CASE WHEN m.assoc_disc_ind = 0 OR i.assoc_disc_ind = 0 THEN 0 ELSE COALESCE(sc.vat_sell_price_amt,0) + COALESCE(sc.vat_sell_price_amt * du.lsvatinc,0) END) OVER (PARTITION BY sc.visit_nbr,sc.store_nbr,sc.visit_dt) END AS visitamtfordisc
+                                    ,COALESCE(-t.tndr_amt,0) AS colleaguediscount
+                                    ,sc.load_ts
+                                    FROM  sc
+                                    INNER JOIN vt ON sc.visit_nbr = vt.visit_nbr AND sc.store_nbr = vt.store_nbr AND sc.visit_dt = vt.visit_dt
+                                    LEFT OUTER JOIN t ON sc.visit_nbr = t.visit_nbr AND sc.store_nbr = t.store_nbr AND sc.visit_dt = t.visit_dt
+                                    LEFT OUTER JOIN m ON sc.scan_id = m.mds_fam_id
+                                    LEFT OUTER JOIN i ON sc.scan_id = i.item_nbr
+                                    LEFT OUTER JOIN ti ON sc.visit_nbr = cast(ti.visit_nbr as INT) AND sc.store_nbr = cast(ti.store_nbr as INT) AND sc.visit_dt = ti.visit_dt
+                                    LEFT OUTER JOIN du ON sc.visit_nbr = du.visit_nbr AND sc.store_nbr = du.store_nbr AND sc.visit_dt = du.visit_dt AND CAST(sc.linksave_offr_id_1/10 AS INT) = du.linksave_offer
+                                    LEFT OUTER JOIN p on FLOOR(sc.upc_nbr/10) = p.Item_barcode AND sc.visit_dt = p.collection_date
+                                    LEFT OUTER JOIN mt ON sc.visit_nbr = mt.visit_nbr AND sc.store_nbr = mt.store_nbr AND sc.visit_dt = mt.visit_dt
+                                    WHERE (sc.linksave_item_ind = 0 OR sc.linksave_item_ind IS NULL OR sc.SCAN_TYPE = 2 OR mt.store_nbr IS NOT NULL)'''
+
+        self.output_query = '''SELECT
+                                slc.basket_id
+                                ,slc.visit_nbr
+                                ,slc.tc_nbr
+                                ,slc.ghs_order_id 
+                                ,slc.sng_cart_id
+                                ,slc.visit_ts
+                                ,slc.store_nbr
+                                ,slc.scan_id
+                                ,slc.upc_nbr
+                                ,CASE WHEN slc.m_mds_fam_id IS NOT NULL AND slc.scan_type = 0 THEN slc.m_mds_fam_id WHEN slc.i_item_nbr IS NOT NULL AND slc.scan_type = 4 THEN slc.i_mds_fam_id ELSE NULL END AS mds_fam_id
+                                ,CASE WHEN slc.m_mds_fam_id IS NOT NULL AND slc.scan_type = 0 THEN slc.m_item_nbr WHEN slc.i_item_nbr IS NOT NULL AND slc.scan_type = 4 THEN slc.i_item_nbr ELSE NULL END AS item_nbr
+                                ,CASE WHEN slc.m_mds_fam_id IS NOT NULL AND slc.scan_type = 0 THEN slc.m_cons_item_nbr WHEN slc.i_item_nbr IS NOT NULL AND slc.scan_type = 4 THEN slc.i_cons_item_nbr ELSE NULL END AS cons_item_nbr
+                                ,CASE WHEN slc.m_mds_fam_id IS NOT NULL AND slc.scan_type = 0 THEN slc.m_original_cin WHEN slc.i_item_nbr IS NOT NULL AND slc.scan_type = 4 THEN slc.i_original_cin ELSE NULL END AS original_cin
+                                ,CASE WHEN slc.m_mds_fam_id IS NOT NULL AND slc.scan_type = 0 THEN slc.m_vendor_nbr WHEN slc.i_item_nbr IS NOT NULL AND slc.scan_type = 4 THEN slc.i_vendor_nbr ELSE NULL END AS vendor_nbr
+                                ,slc.rtn_item_ind
+                                ,slc.xchng_item_ind
+                                ,slc.void_item_ind
+                                ,slc.void_cmplt_trans_ind
+                                ,CASE WHEN slc.reg_nbr IN (82) THEN 2 WHEN slc.visit_subtype_cd IN (89,152,201,202) THEN 3 ELSE 1 END AS channel_id
+                                ,CASE WHEN COALESCE(slc.linksave,0) <> 0 OR slc.asda_promo_type IN ('Rollback') THEN 'Y' ELSE 'N' END AS promotion_ind
+                                ,slc.asda_promo_type
+                                ,slc.reg_nbr
+                                ,slc.till_type
+                                ,CASE WHEN slc.oprtr_nbr BETWEEN 9000 AND 9099 THEN 1 ELSE NULL END AS self_check_out_ind
+                                ,slc.crncy_cd
+                                ,CASE WHEN slc.m_mds_fam_id IS NOT NULL THEN slc.m_base_rtl_uom_cd  WHEN slc.i_item_nbr IS NOT NULL THEN slc.i_base_rtl_uom_cd ELSE 'na' END AS uom
+                                ,CASE WHEN slc.qty_entr_ind = 1 AND (ABS(slc.unit_qty) - FLOOR(ABS(slc.unit_qty))) = 0 THEN (CASE WHEN slc.vatsell >= 0 THEN ABS(slc.unit_qty) ELSE -ABS(slc.unit_qty) END) ELSE (CASE WHEN slc.vatsell >= 0 THEN ABS(slc.scan_cnt) ELSE -ABS(slc.scan_cnt) END) END AS unmeasured_qty
+                                ,CASE WHEN (ABS(slc.unit_qty) - FLOOR(ABS(slc.unit_qty))) = 0 THEN 0 ELSE (CASE WHEN slc.vatsell >= 0 THEN ABS(slc.unit_qty) ELSE -ABS(slc.unit_qty) END) END AS measured_qty
+                                ,CASE WHEN ROUND(slc.visitamtfordisc,4) = 0 THEN slc.vatsell + slc.linksave ELSE (slc.vatsell + slc.linksave)*(1 + slc.colleaguediscount/slc.visitamtfordisc) END AS sale_amt_inc_vat
+                                ,CASE WHEN slc.vatsell = 0 THEN 0 ELSE (CASE WHEN ROUND(slc.visitamtfordisc,4) = 0 THEN slc.vatsell + slc.linksave ELSE (slc.vatsell + slc.linksave)*(1 + slc.colleaguediscount/slc.visitamtfordisc) END)*(slc.rtlsell/slc.vatsell) END AS sale_amt_exc_vat
+                                ,CASE WHEN m_acct_nbr IS NULL AND i_acct_nbr IS NULL THEN CASE WHEN slc.vatsell = 0 THEN 0 ELSE (slc.vatsell + slc.linksave)*(slc.rtlsell/slc.vatsell) END ELSE 0 END AS sales_asda
+                                ,slc.linksave AS offer_disc_inc_vat
+                                ,CASE WHEN  ROUND(slc.visitamtfordisc,4) = 0  THEN 0 ELSE (slc.vatsell + slc.linksave)*slc.colleaguediscount/slc.visitamtfordisc END AS coll_disc_inc_vat
+                                ,slc.load_ts,slc.visit_dt FROM slc'''
+
+    def run(self):
+        print("****************Execution Start****************")
+
+        df_store_visit_scan = spark.sql(
+            "SELECT * FROM {}.{} where visit_dt >= '2022-01-01' and visit_dt <= '2022-01-31'".format(self.staging_db, self.visit_scan_table))
+        df_store_visit_scan = df_store_visit_scan.withColumn("basket_id", F.concat((F.col("visit_dt").cast(StringType())), (F.col("store_nbr")), (F.col("visit_nbr"))))
+        df_store_visit_scan = df_store_visit_scan.withColumn("basket_id", F.regexp_replace('basket_id', '-', '').cast(DecimalType(38,0)))
+        df_store_visit_scan.createOrReplaceTempView('sc')
+
+        df_store_visit = spark.sql(
+            "SELECT * FROM {}.{} where visit_dt >= '2022-01-01' and visit_dt <= '2022-01-31'".format(self.staging_db, self.store_visit))
+        df_store_visit.createOrReplaceTempView('vt')
+
+        df_store_visit_tender = spark.sql(
+            "SELECT visit_nbr,store_nbr,visit_dt,tndr_amt,tndr_type_cd FROM {}.{} WHERE tndr_type_cd = 99 and visit_dt >= '2022-01-01' and visit_dt <= '2022-01-31'".format(
+                self.staging_db, self.visit_tender))
+        df_store_visit_tender.createOrReplaceTempView('t')
+
+        df_store = spark.sql("SELECT * FROM {}.{}".format(self.staging_db, self.store_table))
+        df_store.createOrReplaceTempView('ds')
+
+        df_item = spark.sql("SELECT * FROM {}.{}".format(self.information_db, self.item_hierarchy))
+        df_item.createOrReplaceTempView('m')
+
+        df_item_filtered = spark.sql(
+            "SELECT original_cin, mds_fam_id,item_nbr,cons_item_nbr,vendor_nbr,assoc_disc_ind,base_rtl_uom_cd ,sell_uom_cd, acct_nbr from m WHERE obsolete_dt is null or obsolete_dt >= '2022-01-01'")
+        df_item_filtered.createOrReplaceTempView('i')
+
+        df_transaction_ids = spark.sql("SELECT  visit_dt, visit_nbr, store_nbr, tc_nbr, ghs_order_id, sng_cart_id FROM {}.{} WHERE visit_dt >= '2022-01-01' and visit_dt <= '2022-01-31' ".format(self.information_db, self.transaction_ids))
+        df_transaction_ids.createOrReplaceTempView('ti')
+
+        df_promo_daily = spark.sql(
+            "SELECT Item_Barcode, asda_promo_type, Collection_Date FROM {}.{}".format(self.staging_db,
+                                                                                      self.promo_daily))
+        df_promo_daily.createOrReplaceTempView('p')
+
+        df_ld = spark.sql(self.ld_sql_txt)
+        df_ld.createOrReplaceTempView('ld')
+
+        df_lq = spark.sql(self.lq_sql_txt)
+        df_lq.createOrReplaceTempView('lq')
+
+        df_du = spark.sql(self.du_sql_txt)
+        df_du.createOrReplaceTempView('du')
+
+        df_mt = spark.sql(self.mt_sql_txt)
+        df_mt.createOrReplaceTempView('mt')
+
+        df_slc = spark.sql(self.slc_sql_txt)
+        df_slc.createOrReplaceTempView('slc')
+
+        df_output = spark.sql(self.output_query)
+
+        df_output.repartition(500)
+        df_output.write.partitionBy('visit_dt').mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+        
+	print("************** SPARK JOB complete****************")
+
+aa = posTransactionOdl()
+aa.run()

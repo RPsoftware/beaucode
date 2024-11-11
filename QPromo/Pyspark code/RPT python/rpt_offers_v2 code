@@ -1,0 +1,120 @@
+from cip.cip.framework.connections.spark import spark
+import datetime
+import subprocess
+import pyspark.sql.functions as F
+
+class rpt_offers:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+
+        #TARGET TABLE
+        self.target_db = 'gb_customer_data_domain_rpt'
+        self.target_table = 'cdd_rpt_qpromo_offers_v2'
+
+        #SOURCE TABLES
+        self.raw_db = 'gb_customer_data_domain_raw'
+        self.store = 'cdd_rpt_dim_store'
+        self.fppd = 'cdd_raw_fct_pricing_promo_daily'
+        self.dih = 'cdd_raw_qpromo_dim_item_hierarchy'
+
+    def run(self):
+        print("************** SPARK JOB Initiated****************")
+        print("")
+        print("compiling data sets to dataframes")
+
+        fact_pricing_df = spark.sql("""SELECT Fact_key, consumer_item_nbr as original_cin, store_nbr, pd.Item_Barcode, Collection_Date, Asda_Linksave_Desc, Asda_Retail_Price_Today, Linksave_Total_Price\
+                                ,Linksave_Qty_Trigger, Linksave_Unit_Price,Linksave_Strt_Dt,Linksave_End_Dt,Asda_Linksave_Offer_Nbr,Asda_Promo_Type,Promo_Start_Date,Promo_End_Date\
+                                ,Store_count,Rollback_Flag,Rollback_Start_Dt,Rollback_End_Dt,Promo_id_key,GMDD_Flag,Home_Bargains_Flag,Supermarket_Linksave_Desc,Supermarket_Linksave_Total_Price\
+                                ,Supermarket_Linksave_Qty_Trigger,Supermarket_Linksave_Unit_Price,Supermarket_Linksave_Strt_Dt,Supermarket_Linksave_End_Dt,Supermarket_Linksave_Offer_Nbr\
+                                ,Supermarket_Promo_Type,Convenience_Linksave_Desc,Convenience_Linksave_Total_Price,Convenience_Linksave_Qty_Trigger,Convenience_Linksave_Unit_Price\
+                                ,Convenience_Linksave_Strt_Dt,Convenience_Linksave_End_Dt,Convenience_Linksave_Offer_Nbr,Convenience_Promo_Type, \
+                                 ' ' as discount_percent, ' ' as discount_amount FROM {}.{}""".format(self.raw_db, self.fppd)
+        print(fact_pricing_df.count())
+        fact_pricing_df.createorReplaceTempView("fact_pricing")
+        
+        linksaves_prod_df = spark.sql("""SELECT Item_barcode, Promo_ID_KEY, 
+                                        MIN(Collection_Date) AS Linksave_prod_Start, 
+                                        MAX(Collection_Date) AS Linksave_Prod_End,
+                                        MIN(CASE WHEN Supermarket_Linksave_Strt_Dt IS NOT NULL THEN Collection_Date ELSE NULL END) AS Supermarket_Linksave_prod_Start, 
+                                        MAX(CASE WHEN Supermarket_Linksave_Strt_Dt IS NOT NULL THEN Collection_Date ELSE NULL END) AS Supermarket_Linksave_prod_End, 
+                                        MIN(CASE WHEN Convenience_Linksave_Strt_Dt IS NOT NULL THEN Collection_Date ELSE NULL END) AS Convenience_Linksave_prod_Start, 
+                                        MAX(CASE WHEN Convenience_Linksave_Strt_Dt IS NOT NULL THEN Collection_Date ELSE NULL END) AS Convenience_Linksave_prod_End
+                                      FROM {}.{} WHERE asda_promo_type IN ('Linksave','Linksave and Rollback')
+                                      GROUP BY Item_barcode, Promo_ID_KEY """.format(self.raw_db, self.fppd))
+        print(linksaves_prod_df.count())
+        linksaves_prod_df.createorReplaceTempView("linksaves_prod")
+        
+        linksaves_promo_df = spark.sql("""SELECT  Promo_ID_KEY,  
+                                        MIN(Linksave_Strt_Dt) AS Linksave_Promo_Strt_Dt,
+                                        MAX(Linksave_End_Dt) AS Linksave_Promo_End_Dt,
+                                        MIN(Supermarket_Linksave_Strt_Dt) AS Supermarket_Linksave_Promo_Strt_Dt,
+                                        MAX(Supermarket_Linksave_End_Dt) AS Supermarket_Linksave_Promo_End_Dt,
+                                        MIN(Convenience_Linksave_Strt_Dt) AS Convenience_Linksave_Promo_Strt_Dt,
+                                        MAX(Convenience_Linksave_End_Dt) AS Convenience_Linksave_Promo_End_Dt
+                                    FROM DW_MERCH.DBO.vwFact_pricing_promo_Daily
+                                    WHERE asda_promo_type IN ('Linksave','Linksave and Rollback')
+                                    GROUP BY Promo_ID_KEY """.format(self.raw_db, self.fppd))
+        print(linksaves_promo_df.count())
+        linksaves_promo_df.createorReplaceTempView("linksaves_promo")
+        
+        rollback_prod_df = spark.sql("""Select Item_barcode, Collection_Date,
+                        CASE WHEN Rollback_Flag = 'Y' THEN MAX(Promo_ID_Key2) over (partition by name_rowid) Else null end as Promo_ID_Key_RB,
+                        CASE WHEN Rollback_Flag = 'Y' THEN MIN(Collection_Date) over (partition by name_rowid) Else null end as Rollback_prod_Start,
+                        CASE WHEN Rollback_Flag = 'Y' THEN MAX(Collection_Date) over (partition by name_rowid) Else null end as Rollback_Prod_End
+                    from (
+                    SELECT *,  max(case when Promo_ID_Key2 is not null then Concat_Data end) over (order by Concat_Data) as name_rowid
+                    FROM (
+                        SELECT * , CONCAT(Item_barcode,date_key) AS Concat_Data,
+                        CASE WHEN  LAG(Rollback_Flag,1) OVER (PARTITION BY Item_Barcode ORDER BY collection_Date) <> Rollback_Flag AND Rollback_Flag = 'Y' THEN Promo_ID_Key ELSE null END
+                        AS Promo_ID_Key2
+                        FROM {}.{} ) AS T1
+                    ) as t2
+                    WHERE Rollback_Flag = 'Y' """.format(self.raw_db, self.fppd))
+        print(rollback_prod_df.count())
+        rollback_prod_df.createorReplaceTempView("rollback_prod")
+        
+        store_nbr_df = spark.sql("""SELECT distinct store_nbr from {}.{} """.format(self.target_db, self.store))
+        
+        dih_df = spark.sql("""select item_key, consumer_item_nbr from {}.{} """.format(self.raw_db, self.dih) 
+   
+        full_df = spark.sql("""SELECT A.*, B.Linksave_prod_Start, B.Linksave_Prod_End, C.Linksave_Promo_Strt_Dt, \
+                                C.Linksave_Promo_End_Dt, Rollback_prod_Start, Rollback_Prod_End, Supermarket_Linksave_prod_Start, \
+                        Supermarket_Linksave_prod_End, Convenience_Linksave_prod_Start, Convenience_Linksave_prod_End, \
+                        Supermarket_Linksave_Promo_Strt_Dt, Supermarket_Linksave_Promo_End_Dt, Convenience_Linksave_Promo_Strt_Dt, \
+                        Convenience_Linksave_Promo_End_Dt \
+                        ,CASE WHEN Asda_promo_type IN ('Linksave','Linksave and Rollback') THEN A.Promo_ID_KEY ELSE NULL END AS Promo_ID_KEY_LS, \
+                        Promo_ID_Key_RB \
+                        FROM fact_pricing AS A \
+                        LEFT JOIN Linksaves_prod AS B \
+                        ON A.Collection_Date BETWEEN Linksave_prod_Start AND Linksave_Prod_End \
+                        AND A.Item_barcode = B.Item_barcode \
+                        AND A.promo_ID_Key = B.Promo_ID_Key \
+                        LEFT JOIN Linksaves_promo AS C \
+                        ON A.Collection_Date BETWEEN Linksave_Promo_Start_Dt AND Linksave_Promo_End_Dt \
+                        AND A.Promo_ID_key = C.Promo_ID_key \
+                        LEFT JOIN Rollback_prod AS D \
+                        ON A.Collection_Date = D.Collection_Date \
+                        AND A.Item_barcode = D.Item_barcode """)
+                        
+        full_df = full_df.distinct()                
+        full_df = full_df.join(dih_df, on=["item_key"], how='INNER')
+        full_df = full_df.drop(dih_df.item_key)
+ 
+        full_df = full_df.crossJoin(store_nbr_df).distinct()
+
+        print("")
+        full_df.printSchema()
+        print(full_df.count())
+
+        spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+
+        full_df.write.mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+        print("Writing to table")
+        print("*****************END*********************************")
+
+ts = rpt_offers()
+ts.run()

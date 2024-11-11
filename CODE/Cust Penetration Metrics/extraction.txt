@@ -1,0 +1,34 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+import datetime as dt
+
+
+class poc:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+
+        self.report_db = cnt["Customer_Staging_Mart"]["cdd_rpt_database"]["extraction_database"]
+        self.cus_pen_table = 'cdd_rpt_customer_penetration'
+        self.path = str(cnt["run_path"]["root_path"]) + '/sourceFiles/nonFtdw/cust_pen/'
+        self.run_date = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def run(self):
+        print("*******************Execution Start*********************")
+
+        cus_pen_df = spark.sql("SELECT * FROM {}.{}".format(self.report_db, self.cus_pen_table))
+
+        cus_pen_df = cus_pen_df.withColumn('lastUpdatedDate',
+                                       F.date_format(F.current_timestamp(), "yyyy-MM-dd'T'HH:mm:ss'Z'"))
+        cus_pen_df = cus_pen_df.repartition(500)
+
+        cus_pen_df = cus_pen_df.fillna("")
+        cus_pen_df.repartition(1).write.mode('overwrite').options(header='True', compression='None', delimiter='|').csv(\
+            self.path)
+        
+        print("*******************Execution End*********************")
+
+ts = poc()
+ts.run()

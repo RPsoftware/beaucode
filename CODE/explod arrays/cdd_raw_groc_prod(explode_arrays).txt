@@ -1,0 +1,88 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+class grocProd:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Source table
+        #self.source_db = 'gb_product_dl_tables'
+        #self.source_table = 'groc_prod'
+
+        # RAW TARGET Table
+        self.target_db = 'gb_customer_data_domain_raw'
+        self.target_table = 'cdd_raw_groc_prod_explode_arrays'
+
+    def run(self):
+        print("****************Execution Start****************")
+
+		groc_prod_df = spark.sql("select sku_id, cons_item_nbr,sku_type_cd,prmry_shelf_id,prmry_aisle_id,prmry_dept_id,prmry_catg_id,extd_taxonomy_desc,tot_ratg_nbr,avg_ratg_nbr, \
+									prod_rstr_txt, upc_lst_txt, untraited_store_lst_txt, prod_id, \
+									disp_onln_ind, prod_status_nm,prod_start_dt,\
+									prod_end_dt,prod_disp_nm,prod_desc,cart_desc,brand_nm,addl_info_txt,picker_desc,\
+									addl_picker_desc,sales_type_cd,avg_wt_qty,max_allow_qty,max_allow_home_shopping_cntr_qty,coming_soon_txt,\
+									sub_ind,bws_rstr_ind,pharm_rstr_ind,meta_srch_keywords_txt,prod_scene_img_id,\
+									prod_scene_img_host_nm, promo_type_cd, promo_start_dt, promo_end_dt, coming_soon_prod_price_ind,\
+									on_sale_ind, promo_was_price_amt, frsh_dys_cnt, frsh_min_dys_cnt, frsh_max_dys_cnt, sell_by_dt,favourites_isrt_ind, favourites_isrt_start_dt,\
+									favourites_isrt_end_dt,remove_from_cust_shopping_lst_ind,favourites_remove_ind, \
+									bundle_lst_txt, bundle_price_amt, \
+									icon_lst_txt, facet_lst_txt, sub_lst_txt, cust_base_rtl_amt, base_unit_rtl_amt,\
+									sell_qty,unit_cost_amt,price_comp_qty,vnpk_qty,vnpk_cube_qty,vnpk_wt_qty,dept_nbr,create_dt,upd_dt,us_upc_nbr,prod_status_cd,\
+									sell_uom_cd,price_comp_uom_cd,uniq_prod_id,vnpk_cube_uom_cd,vnpk_wt_uom_cd,last_modfd_ind,price_upd_ind,prod_size_qty,item_status_cd,\
+									assoc_disc_ind,eu_upc_nbr,src_rcv_ts,load_ts,load_userid,upd_ts,upd_userid,asset_type_cd,win_nbr,bws_ind,\
+									fineline_nbr,repl_unit_ind,repl_ind, \
+									item_subclass_map_json_desc, prmry_shelf_nbr,pub_ind,ean_id, \
+									src_pub_dt \
+									FROM gb_customer_data_domain_raw.cdd_raw_groc_prod WHERE src_pub_dt > '2022-04-29' ")
+	
+		#arrays/dicts to explode/split 
+	
+		bb_json_txt_df = spark.sql("SELECT sku_id, bb_json_txt FROM FROM gb_customer_data_domain_raw.cdd_raw_groc_prod WHERE src_pub_dt > '2022-04-29'" )
+    	bb_nutritional_info_json_txt_df = spark.sql("SELECT sku_id, bb_nutritional_info_json_txt FROM FROM gb_customer_data_domain_raw.cdd_raw_groc_prod WHERE src_pub_dt > '2022-04-29'" )
+		bb_nutritional_val_json_txt_df = spark.sql("SELECT sku_id, bb_nutritional_val_json_txt FROM FROM gb_customer_data_domain_raw.cdd_raw_groc_prod WHERE src_pub_dt > '2022-04-29'" )
+	
+		# join data 
+		df_final = groc_prod_df.join(extd_taxonomy_desc_df, on=[("sku_id")], how='LEFT')
+		df_final = df_final.join(prod_rstr_txt_df, on=[("sku_id")] ,how='LEFT')
+		df_final = df_final.join(upc_lst_txt_df, on=[("sku_id")], how='LEFT')
+    	
+
+		df_final.repartition('src_pub_dt')
+	
+		df_output = df_final.select(F.col('sku_id'), F.col('cons_item_nbr'),F.col('sku_type_cd'),F.col('prmry_shelf_id'),F.col('prmry_aisle_id'),F.col('prmry_dept_id'),F.col('prmry_catg_id'),
+		
+                                        F.col('tot_ratg_nbr'), \
+										F.col('avg_ratg_nbr'), \
+										F.col('prod_rstr_txt'), \
+										F.col('untraited_store_lst_txt'), \
+                                        F.col('prod_id'), F.col('disp_onln_ind'), F.col('prod_status_nm'), F.col('prod_start_dt'), \
+                                        F.col('prod_end_dt'), F.col('prod_disp_nm'), F.col('prod_desc'), F.col('cart_desc'), F.col('brand_nm'), F.col('addl_info_txt'), F.col('picker_desc'), F.col('addl_picker_desc'),\
+										F.col('sales_type_cd'), F.col('avg_wt_qty'), F.col('max_allow_qty'), \
+                                        F.col('max_allow_home_shopping_cntr_qty'), F.col('coming_soon_txt'), F.col('sub_ind'), F.col('bws_rstr_ind'), F.col('pharm_rstr_ind'), \
+										F.col('meta_srch_keywords_txt'), F.col('prod_scene_img_id'), F.col('prod_scene_img_host_nm'), F.col('promo_type_cd'), \
+                                        F.col('promo_start_dt'), F.col('promo_end_dt'), F.col('coming_soon_prod_price_ind'), F.col('on_sale_ind'), F.col('promo_was_price_amt'), F.col('frsh_dys_cnt'),\
+										F.col('frsh_min_dys_cnt'), F.col('frsh_max_dys_cnt'), F.col('sell_by_dt'), \
+                                        F.col('favourites_isrt_ind'), F.col('favourites_isrt_start_dt'), F.col('favourites_isrt_end_dt'), F.col('remove_from_cust_shopping_lst_ind'), F.col('favourites_remove_ind'),\
+										F.col('bundle_link'), F.col('qty'), F.col('bundle_price_amt'), \
+                                        F.col('icon_lst_txt'), F.col('facet_lst_txt'), F.col('sub_lst_txt'), F.col('cust_base_rtl_amt'), F.col('base_unit_rtl_amt'), F.col('sell_qty'), F.col('unit_cost_amt'),\
+										F.col('price_comp_qty'), F.col('vnpk_qty'), F.col('vnpk_cube_qty'), F.col('vnpk_wt_qty'), F.col('dept_nbr'), \
+                                        F.col('create_dt'), F.col('upd_dt'), F.col('us_upc_nbr'), F.col('prod_status_cd'), F.col('sell_uom_cd'), F.col('price_comp_uom_cd'), F.col('uniq_prod_id'), F.col('vnpk_cube_uom_cd'),\
+										F.col('vnpk_wt_uom_cd'), F.col('last_modfd_ind'), F.col('price_upd_ind'), F.col('prod_size_qty'),\
+                                        F.col('item_status_cd'), F.col('assoc_disc_ind'), F.col('eu_upc_nbr'), F.col('src_rcv_ts'), F.col('load_ts'), F.col('load_userid'), F.col('upd_ts'), F.col('upd_userid'),\
+										F.col('asset_type_cd'), F.col('win_nbr'), F.col('bws_ind'), F.col('fineline_nbr'), F.col('repl_unit_ind'),\
+                                        F.col('repl_ind'),F.col('mds_fam_id'), F.col('subclass_nbr'),F.col('prmry_shelf_nbr'), F.col('pub_ind'), F.col('bb_json_txt'),F.col('ean_id'), F.col('bb_nutritional_info_json_txt'),\
+										F.col('bb_nutritional_val_json_txt'), F.col('src_pub_dt'))
+		df_output.repartition('src_pub_dt')
+
+		# write to table  
+		spark.conf.set("spark.sql.shuffle.partitions", 500)
+    	df_output.write.partitionBy('src_pub_dt').mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+    	print("************** SPARK JOB complete****************")
+
+aa = grocProd()
+aa.run()
+

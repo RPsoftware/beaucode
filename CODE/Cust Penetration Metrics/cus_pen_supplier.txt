@@ -1,0 +1,49 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+class rptCustPenTot:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_rpt_database"]["extraction_database"]
+        self.target_table = 'cdd_rpt_customer_penetration'
+
+        # Source Databases
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        # Src Tables
+        self.odl_cp = 'cdd_odl_customer_penetration'
+        self.odl_s1 = 'cdd_odl_cus_pen_stage1'
+
+    def run(self):
+        print("****************START**************************")
+
+        #ingest odl_customer_penetration and odl_stage1 data
+
+        rest_df = spark.sql("SELECT * FROM {}.{} WHERE hierarchy_level NOT IN ('product_profile_group', 'product') ".format(self.information_db, self.odl_cp)).repartition(100)
+
+        ppg_df = spark.sql("SELECT a.*, b.vendor_nm as supplier FROM {}.{} a left join (select distinct vendor_nm, fineline_nbr FROM {}.{} ) b on a.hierarchy_level_id = b.fineline_nbr WHERE a.hierarchy_level = 'product_profile_group' "\
+                                .format(self.information_db,self.odl_cp, self.information_db, self.odl_s1))
+
+        prod1_df = spark.sql("SELECT a.*, b.vendor_nm as supplier FROM (SELECT * FROM {}.{} WHERE hierarchy_level_id IS NOT NULL AND hierarchy_level_id = 'product') a left join (select distinct vendor_nm, original_cin FROM {}.{} ) b on a.hierarchy_level_id = b.original_cin "\
+                                .format(self.information_db,self.odl_cp, self.information_db, self.odl_s1))
+
+        prod2_df = spark.sql("SELECT a.*, b.vendor_nm as supplier FROM (SELECT * FROM {}.{} WHERE hierarchy_level_id IS NULL AND hierarchy_level_id = 'product') a left join (select distinct vendor_nm, prod_desc FROM {}.{} ) b on a.hierarchy_level_name = b.prod_desc "\
+                                .format(self.information_db,self.odl_cp, self.information_db, self.odl_s1))
+
+        prod_df = prod1_df.union(prod2_df)
+
+        rest_df = rest_df.withColumn('supplier', F.lit(None)).repartition(100)
+
+        final_df = rest_df.union(ppg_df)
+        final_df = final_df.union(prod_df)
+
+        final_df.write.partitionBy('hierarchy_level').mode('overwrite').saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+        print("*********************END*******************************************************")
+
+ts = rptCustPenTot()
+ts.run()
+~             

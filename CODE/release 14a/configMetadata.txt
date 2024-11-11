@@ -1,0 +1,19 @@
+
+INSERT INTO gb_customer_data_domain_raw.config_metadata_details
+(feed_name, raw_dest_table_name, raw_dest_db_name, source_file_name, 
+source_file_path, source_file_schema, source_file_delimiter, source_file_format, source_file_header, source_file_columns, 
+load_type, load_sub_type, source_db_name, source_table_name, source_table_columns, increment_column_name, increment_column_value, 
+partition_column_name, source_primary_key, dest_primary_key, data_purge_value, rpt_dest_table_name, rpt_dest_db_name, 
+rpt_dest_table_columns, rpt_join_condition, created_date)
+VALUES ('CDW_CALENDAR', 'cdd_raw_dim_calendar_cdw', 'gb_customer_data_domain_raw', 'vwDailySales_Datamart_Dim_Calendar_CDW.csv', 
+'/user/svc_uk_cust_rdl/sourceFiles/ftdw/dim_calendar/', 'DimCalSK BIGINT, Day_Date DATE,  asda_Day STRING, asda_wk_nbr BIGINT,  asda_qtr BIGINT,   asda_year BIGINT',
+'|', 'csv', 'FALSE', NULL, 'full', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '2022-01-10');
+
+INSERT INTO gb_customer_data_domain_raw.config_metadata_details
+(feed_name, raw_dest_table_name, raw_dest_db_name, source_file_name, 
+source_file_path, source_file_schema, source_file_delimiter, source_file_format, source_file_header, source_file_columns, load_type, load_sub_type, source_db_name, source_table_name, source_table_columns, increment_column_name, increment_column_value, partition_column_name, source_primary_key, dest_primary_key, data_purge_value, rpt_dest_table_name, rpt_dest_db_name, rpt_dest_table_columns, rpt_join_condition, created_date)
+VALUES ('BRANCH_COMP_STATUS', 'cdd_raw_branch_comp_status', 'gb_customer_data_domain_raw', 'vwDailySales_Datamart_Fct_BranchCompStatus.csv', 
+'/user/svc_uk_cust_rdl/sourceFiles/ftdw/branch_comp_status/',
+'DimBranchSK BIGINT, DimCalSK BIGINT, DimWalmartDivSK BIGINT, CompFlag TINYINT, Cr8dttm DATE, LastUpdDtTm DATE, LDM_DT_LASTLOAD TIMESTAMP',
+'|', 'csv', 'FALSE', '', 'full', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '2022-01-10');
+

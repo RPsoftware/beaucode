@@ -1,0 +1,304 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+from datetime import datetime, timedelta
+import pyspark.sql.functions as F
+from pyspark.sql.types import DecimalType, StringType, TimestampType
+from pyspark.sql.window import *
+
+class transID:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        # self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        # self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_transaction_ids"]
+        self.target_db = 'gb_customer_data_domain_odl'
+        self.target_table = 'cdd_odl_transaction_ids_uat_2022_05_27'
+
+        # Source Databases
+        self.staging_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+
+        # Src Tables
+        # self.store_visit = cnt["Customer_Staging_Mart"]["csm_tables"]["cdd_raw_store_visit"]
+        self.store_visit = 'cdd_raw_store_visit'
+        # self.scan = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_store_visit_scan"]
+        self.scan = 'cdd_raw_store_visit_scan'
+        # self.store_trans = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_store_transaction"]
+        self.store_trans = 'cdd_raw_store_transaction'
+        # self.store_tender = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_store_visit_tender"]
+        self.store_tender = 'cdd_raw_store_visit_tender'
+        # self.eic = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_eic_order_details"]
+        self.eic = 'cdd_raw_eic_order_details'
+        # self.ghs = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_ghs_order"]
+        self.ghs = 'cdd_raw_ghs_order'
+        # self.sng = cnt["Customer_Staging_Mart"] ["csm_tables"] ["cdd_raw_sng_visit"]
+        self.sng = 'cdd_raw_sng_visit'
+        # self.sng_matching = cnt["Customer_Staging_Mart"] ["cdd_odl_tables"] ["cdd_odl_sng_matching"]
+        self.sng_matching = 'cdd_odl_sng_matching'
+        self.wallet = 'cdd_raw_wallet_pos_txns'
+        self.loyalty = 'cdd_raw_loyalty_acct'
+       
+	'''
+        # FOR DAILY LOAD
+        self.run_path = "/user/svc_uk_cust_rdl"
+        self.highwatermark_path = '/state/transaction_ids_max_date.txt'
+        self.highwatermark_raw = \
+                spark.read.csv(str(self.run_path) + str(self.highwatermark_path)).rdd.flatMap(lambda x: x).collect()[0]
+       self.highwatermark_int1 = datetime.strptime(self.highwatermark_raw, '%Y-%m-%d')
+        self.highwatermark_int2 = self.highwatermark_int1 - timedelta(days=1)
+       self.highwatermark = self.highwatermark_int2.strftime("%Y-%m-%d")
+
+        print(self.highwatermark)
+        '''
+
+    def run(self):
+        # Ingest data from hive tables and store as df for later transformation and joins
+
+        # assign max/min date to help with historical data load
+        min_date = '2022-04-30'
+        max_date = '2022-05-13'
+
+        sv_df = spark.sql("SELECT visit_dt, visit_nbr, store_nbr, visit_ts, trans_nbr, reg_nbr, visit_subtype_cd \
+                                                                        FROM {}.{} WHERE visit_dt >= '{}' AND visit_dt <= '{}'".format(
+            self.staging_db, self.store_visit, min_date, max_date))
+
+        '''
+        # FOR DAILY LOAD
+        sv_df = spark.sql("SELECT visit_dt, visit_nbr, store_nbr, visit_ts, trans_nbr, reg_nbr, visit_subtype_cd \
+                                                                        FROM {}.{} WHERE visit_dt > '{}'".format(self.staging_db,self.store_visit, self.highwatermark))
+        sv_df.repartition('visit_dt')
+        '''
+        # Filter dates to match date range of store_visit. This helps speed of processing data in getNonScanFlag method below.
+        sv_max_date = sv_df.agg(F.max('visit_dt')).collect()[0][0]
+        sv_min_date = sv_df.agg(F.min('visit_dt')).collect()[0][0]
+
+        svs_df = spark.sql(
+            "SELECT visit_dt, store_nbr, visit_nbr FROM {}.{} WHERE visit_dt >= '{}' AND visit_dt <= '{}'".format(
+                self.staging_db, self.scan, sv_min_date, sv_max_date))
+
+        s_trns_df = spark.sql("SELECT visit_date, visit_nbr, store_nbr, tc_nbr, receipt_seq_nbr FROM {}.{}\
+                                                                 WHERE visit_date >= '{}' AND visit_date <= '{}'" \
+                              .format(self.staging_db, self.store_trans, sv_min_date, sv_max_date))
+
+        s_trns_df = s_trns_df.withColumn("row_num", F.row_number().over(
+            Window.partitionBy("visit_date", "store_nbr", "visit_nbr").orderBy(F.asc("receipt_seq_nbr"))))
+        s_trns_df = s_trns_df.filter(F.col('row_num') == 1).drop('row_num')
+        s_trns_df = s_trns_df.select('visit_date', 'store_nbr', 'visit_nbr', 'tc_nbr')
+        s_trns_df.repartition('visit_date')
+
+        s_tndr_df = spark.sql("SELECT store_nbr, visit_dt, visit_nbr, tndr_amt, debit_rq_tm, trim(acct_nbr) as acct_nbr FROM \
+                                                                {}.{} WHERE tndr_type_cd = 8 AND visit_dt >= '{}' AND visit_dt <= '{}'" \
+                              .format(self.staging_db, self.store_tender, sv_min_date, sv_max_date))
+
+        eic_df = spark.sql("SELECT order_id, tc_num FROM {}.{}".format(self.staging_db, self.eic))
+
+        ghs_df = spark.sql(
+            "SELECT singl_profl_id, web_order_id, xprs_order_ind, fulfmt_type_cd, src_last_modfd_ts FROM {}.{}".format(self.staging_db,
+                                                                                                    self.ghs))
+
+        sng_df = spark.sql("SELECT cust_singl_profl_id, cart_id as sngv_cart_id, trans_cd, trans_nbr FROM {}.{}\
+                                                 WHERE trans_cd != '' ".format(self.staging_db, self.sng))
+        sng_unq_df = sng_df.groupBy('trans_cd').agg(F.count('cust_singl_profl_id').alias('cnt_spid')).filter(
+            F.col('cnt_spid') == 1)
+        sng_unq_df = sng_df.join(sng_unq_df, on=['trans_cd'], how='INNER')
+        sng_dup_df = sng_df.groupby('trans_cd').agg(F.count('cust_singl_profl_id').alias('cnt_spid')).filter(
+            F.col('cnt_spid') > 1)
+        sng_dup_df = sng_df.join(sng_dup_df, on=['trans_cd'], how='INNER')
+
+        sng_mtchng_df = spark.sql("SELECT store_nbr, visit_dt, visit_nbr, cart_id as sng_mtch_cart_id FROM {}.{} WHERE \
+                                                                visit_dt >= '{}' AND visit_dt <= '{}' ".format(
+            self.information_db, self.sng_matching, sv_min_date, sv_max_date))
+            
+        wallet_df = spark.sql("SELECT wallet_id, reg_nbr, store_nbr, trans_rcpt_nbr, visit_dt, trans_nbr, chnl_nm FROM {}.{} WHERE \
+                                                                visit_dt >= '{}' AND visit_dt <='{}' ".format(self.staging_db, self.wallet, sv_min_date, sv_max_date))
+        wallet_ecom_df = wallet_df.filter(F.col('chnl_nm') == 'ecom')\
+                                    .select(F.col('wallet_id').alias('ecom_wallet_id'), F.col('trans_rcpt_nbr'))
+        
+        wallet_non_ecom_df = wallet_df.filter(F.col('chnl_nm') != 'ecom')\
+                                    .select(F.col('wallet_id').alias('non_ecom_wallet_id'), F.col('store_nbr'), F.col('visit_dt'), F.col('reg_nbr'), F.col('trans_nbr'))\
+                                    .repartition('visit_dt')
+
+        loyalty_df = spark.sql("SELECT wallet_id, singl_profl_id FROM {}.{} ".format(self.staging_db, self.loyalty))
+        wallet_loyalty = wallet_df.join(loyalty_df, on=["wallet_id"], how='LEFT')\
+                                    .select(F.col('wallet_id'), F.col('singl_profl_id').alias('loyalty_spid'))
+
+
+        # Add derived basket_id to store_visit, scan, store_tender and sng_matching
+
+        sv_df = sv_df.withColumn("basket_id", F.concat((F.col("visit_dt").cast(StringType())), (F.col("store_nbr")),
+                                                       (F.col("visit_nbr"))))
+        sv_df = sv_df.withColumn("basket_id", F.regexp_replace('basket_id', '-', '').cast(DecimalType(38, 0)))
+
+        svs_df = svs_df.withColumn("svs_bas_id", F.concat((F.col("visit_dt").cast(StringType())), (F.col("store_nbr")),
+                                                          (F.col("visit_nbr"))))
+        svs_df = svs_df.withColumn("svs_bas_id", F.regexp_replace('svs_bas_id', '-', '').cast(DecimalType(38, 0)))
+
+        s_trns_df = s_trns_df.withColumn("basket_id",
+                                         F.concat((F.col("visit_date").cast(StringType())), (F.col("store_nbr")),
+                                                  (F.col("visit_nbr"))))
+        s_trns_df = s_trns_df.withColumn("basket_id", F.regexp_replace('basket_id', '-', '').cast(DecimalType(38, 0)))
+
+        sng_mtchng_df = sng_mtchng_df.withColumn("basket_id",
+                                                 F.concat((F.col("visit_dt").cast(StringType())), (F.col("store_nbr")),
+                                                          (F.col("visit_nbr"))))
+        sng_mtchng_df = sng_mtchng_df.withColumn("basket_id",
+                                                 F.regexp_replace('basket_id', '-', '').cast(DecimalType(38, 0)))
+
+        ## CALL FUNCTIONS ##
+
+        s_tndr_df = self.getAcctNbr(s_tndr_df)
+        sv_df = self.getNonScanFlag(sv_df, svs_df)
+        sv_df = self.getCSPID(sv_df, s_trns_df, sng_unq_df, sng_dup_df)
+        eic_ghs_trans_df = self.getOrderID(s_trns_df, eic_df, ghs_df)
+        trans_ids_df = self.CreateOutput(sv_df, eic_ghs_trans_df, s_tndr_df, sng_mtchng_df, wallet_ecom_df, wallet_non_ecom_df, wallet_loyalty)
+        final_df = self.FinalDF(trans_ids_df)
+
+        # write to table
+        final_df.write.partitionBy('visit_dt').mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+        '''
+        # FOR DAILY LOAD
+        spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+        final_df.write.mode("overwrite").insertInto("{}.{}".format(self.target_db, self.target_table), overwrite=True)
+
+       
+        # Over the high watermark
+        new_max_date = df_output.agg(F.max('visit_dt')).collect()[0][0]
+
+        proc = subprocess.Popen(
+            "echo " + str(new_max_date) + " |" + " hadoop fs -put -f - " + str(self.run_path) + str(
+                self.highwatermark_path),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+        (output, errors) = proc.communicate()
+        '''
+
+    @staticmethod
+    def getAcctNbr(s_tndr_df):
+        s_tndr_df = s_tndr_df.withColumn("row_num", F.row_number().over(
+            Window.partitionBy("visit_dt", "store_nbr", "visit_nbr").orderBy(F.desc("tndr_amt"))))
+        s_tndr_df = s_tndr_df.filter(F.col('row_num') == 1).drop('row_num')
+        s_tndr_df = s_tndr_df.withColumn("row_num", F.row_number().over(
+            Window.partitionBy("visit_dt", "store_nbr", "visit_nbr", "tndr_amt").orderBy(F.asc("debit_rq_tm"))))
+        s_tndr_df = s_tndr_df.filter(F.col('row_num') == 1).drop('row_num')
+        s_tndr_df = s_tndr_df.select('visit_dt', 'store_nbr', 'visit_nbr', 'acct_nbr')
+        s_tndr_df.repartition('visit_dt')
+
+        return (s_tndr_df)
+
+    @staticmethod
+    def getNonScanFlag(sv_df, svs_df):
+        sv_df = sv_df.join(svs_df, on=[sv_df.basket_id == svs_df.svs_bas_id], how='LEFT').drop(svs_df.visit_dt).drop(
+            svs_df.store_nbr).drop(svs_df.visit_nbr)
+        sv_df = sv_df.withColumn('non_scan_visit_ind', F.expr("CASE WHEN svs_bas_id IS NULL THEN '1'" +
+                                                              "ELSE '0' END"))
+        return (sv_df)
+
+    @staticmethod
+    def getCSPID(sv_df, s_trns_df, sng_unq_df, sng_dup_df):
+        sv_df = sv_df.join(s_trns_df, on=['basket_id'], how='LEFT').drop(s_trns_df.visit_nbr).drop(
+            s_trns_df.store_nbr).drop(s_trns_df.visit_date)
+
+        # from the two dataframes created in the main program, fetch the correct SPID and sngv_cart_id -- if the SPID is distinct then match on tc_nbr = trans_cd BUT if SPID is a duplicate match on trans_nbr = trans_nbr as well ##
+
+        sng_unq_df = sng_unq_df.select('trans_cd', F.col('cust_singl_profl_id').alias('unq_spid'),
+                                       F.col('sngv_cart_id').alias('unq_cart_id'))
+        sv_df = sv_df.join(sng_unq_df, on=[(sv_df.tc_nbr == sng_unq_df.trans_cd)], how='LEFT')
+
+        sng_dup_df = sng_dup_df.select(F.col('trans_nbr').alias('dup_tnbr'), 'trans_cd',
+                                       F.col('cust_singl_profl_id').alias('dup_spid'),
+                                       F.col('sngv_cart_id').alias('dup_cart_id'))
+        sv_df = sv_df.join(sng_dup_df,
+                           on=[(sv_df.tc_nbr == sng_dup_df.trans_cd) & (sv_df.trans_nbr == sng_dup_df.dup_tnbr)],
+                           how='LEFT')
+
+        sv_df = sv_df.withColumn('cust_singl_profl_id',
+                                 F.expr("CASE WHEN dup_spid IS NOT NULL THEN dup_spid ELSE unq_spid END"))
+        sv_df = sv_df.withColumn('sngv_cart_id',
+                                F.expr("CASE WHEN dup_cart_id IS NOT NULL THEN dup_cart_id ELSE unq_cart_id END"))
+
+        sv_df = sv_df.select('basket_id', 'visit_dt', 'store_nbr', 'visit_nbr', 'visit_ts', 'trans_nbr', 'reg_nbr',
+                             'visit_subtype_cd', 'tc_nbr', 'cust_singl_profl_id', 'sngv_cart_id', 'non_scan_visit_ind') \
+           .drop(s_trns_df.tc_nbr)
+
+        sv_df.repartition('visit_dt')
+
+        return (sv_df)
+
+    @staticmethod
+    def getOrderID(s_trns_df, eic_df, ghs_df):
+
+        ghs_df = ghs_df.withColumn("row_num", F.row_number().over(Window.partitionBy("web_order_id").orderBy(F.desc("src_last_modfd_ts"))))
+        ghs_df = ghs_df.filter(F.col('row_num') == 1).drop('row_num').drop('src_last_modfd_ts')
+        eic_ghs_df = eic_df.join(ghs_df, on=[eic_df.order_id == ghs_df.web_order_id], how='LEFT')
+        eic_ghs_trans_df = s_trns_df.join(eic_ghs_df, on=[s_trns_df.tc_nbr == eic_ghs_df.tc_num], how='LEFT').drop(
+            s_trns_df.visit_nbr).drop(s_trns_df.store_nbr).drop(s_trns_df.visit_date)
+
+        return (eic_ghs_trans_df)
+
+    @staticmethod
+    def CreateOutput(sv_df, eic_ghs_trans_df, s_tndr_df, sng_mtchng_df, wallet_ecom_df, wallet_non_ecom_df, wallet_loyalty):
+        # Variables used for channel_id derivation
+        reg_nbr = 82
+        subtype_li = [89, 152, 201, 202]
+        def_channel_id = 1
+
+        final_df = sv_df.join(eic_ghs_trans_df, on=["basket_id"], how='LEFT').drop(eic_ghs_trans_df.basket_id)
+        final_df = final_df.withColumn("channel_id", (
+            F.when(F.col('reg_nbr') == reg_nbr, 2).when(F.col('visit_subtype_cd').isin(subtype_li), 3).otherwise(
+                def_channel_id)))
+        final_df = final_df.join(s_tndr_df, on=["visit_dt", "store_nbr", "visit_nbr"], how='LEFT').drop(
+            s_tndr_df.visit_dt).drop(s_tndr_df.store_nbr).drop(s_tndr_df.visit_nbr)
+        final_df = final_df.join(wallet_ecom_df, on=[final_df.order_id == wallet_ecom_df.trans_rcpt_nbr], how='LEFT').drop(wallet_ecom_df.trans_rcpt_nbr)
+        final_df = final_df.join(wallet_non_ecom_df, on=["store_nbr", "visit_dt", "reg_nbr", "trans_nbr"], how='LEFT')\
+                                    .drop(wallet_non_ecom_df.reg_nbr)\
+                                    .drop(wallet_non_ecom_df.store_nbr)\
+                                    .drop(wallet_non_ecom_df.visit_dt)\
+                                    .drop(wallet_non_ecom_df.trans_nbr)
+        final_df = final_df.withColumn('wallet_id', F.expr("CASE WHEN ecom_wallet_id IS NOT NULL THEN ecom_wallet_id ELSE non_ecom_wallet_id END"))
+        final_df = final_df.join(wallet_loyalty, on=[final_df.wallet_id == wallet_loyalty.wallet_id], how='LEFT').drop(wallet_loyalty.wallet_id)
+        trans_ids_df = final_df.join(sng_mtchng_df, on=["basket_id"], how='LEFT').drop(sng_mtchng_df.visit_dt).drop(
+            sng_mtchng_df.store_nbr).drop(sng_mtchng_df.visit_nbr)
+        return (trans_ids_df)
+
+    @staticmethod
+    def FinalDF(trans_ids_df):
+       # Dates used for cart_id
+        before_date = '2021-12-06'
+        after_date = '2021-12-05'
+
+        final_df = trans_ids_df.select('basket_id',\
+                                       'store_nbr',\
+                                       'visit_nbr',\
+                                       'visit_ts', \
+                                       'trans_nbr', \
+                                       'reg_nbr', \
+                                       'visit_subtype_cd',\
+                                       'channel_id', 'tc_nbr',\
+                                        (F.col('acct_nbr').alias('lead_xref')), \
+                                        (F.col('order_id').alias('ghs_order_id')), \
+                                        F.when((F.col('channel_id') == 2) & (F.length(F.col('order_id')) == 18), 'Marketplace')\
+                                            .when((F.col('channel_id') == 2) & (F.col('order_id').isNull()) , 'Unknown')\
+                                            .when((F.col('channel_id') == 2) & (F.length(F.col('order_id')) != 18) & ((F.col('order_id').isNotNull())), trans_ids_df.fulfmt_type_cd).otherwise(None).alias('fulfmt_type_cd'), \
+                                        'xprs_order_ind', \
+                                        F.when(F.col('wallet_id').isNotNull(), trans_ids_df.loyalty_spid)\
+                                            .when((F.col('channel_id') == 2) & (F.col('wallet_id').isNull()), trans_ids_df.singl_profl_id)\
+                                            .when((F.col('channel_id') == 3) & (F.col('wallet_id').isNull()), trans_ids_df.cust_singl_profl_id)\
+                                            .otherwise(None).alias('singl_profl_id'), \
+                                        F.when(((F.col('channel_id') == 3) & (trans_ids_df.visit_dt < (before_date))), trans_ids_df.sng_mtch_cart_id)\
+                                            .when(((F.col('channel_id') == 3) & (trans_ids_df.visit_dt > (after_date))), trans_ids_df.sngv_cart_id).otherwise(None).alias('sng_cart_id'), \
+                                        'wallet_id', \
+                                        'non_scan_visit_ind', \
+                                        'visit_dt')
+
+        final_df = final_df.distinct()
+        final_df.repartition('visit_dt')
+        return (final_df)
+
+
+ts = transID()
+ts.run()

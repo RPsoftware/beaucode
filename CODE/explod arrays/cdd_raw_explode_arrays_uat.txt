@@ -1,0 +1,104 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+from pyspark.sql.types import StringType, MapType, StructType, ArrayType, StructField
+import json
+
+class grocProd:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Source table
+        #self.source_db = 'gb_product_dl_tables'
+        #self.source_table = 'groc_prod'
+
+        # RAW TARGET Table
+        self.target_db = 'gb_customer_data_domain_raw'
+        self.target_table = 'cdd_raw_groc_prod_explode_arrays_uat'
+ 
+    def run(self):
+        print("****************Execution Start****************")
+
+        groc_prod_df = spark.sql("SELECT distinct sku_id FROM gb_customer_data_domain_raw.cdd_raw_groc_prod")
+
+        #arrays/dicts to explode/split
+        bb_json_txt_df = spark.sql("SELECT distinct sku_id, bb_json_txt FROM gb_customer_data_domain_raw.cdd_raw_groc_prod ")
+        #bb_json_txt_df.printSchema()
+        bb_json_txt_df = bb_json_txt_df.withColumn('info', F.concat(F.lit("["), F.col('bb_json_txt'), F.lit("]")))
+        json_schema = spark.read.option("multiline", "true").json(bb_json_txt_df.rdd.map(lambda row: row.info)).schema
+        bb_json_txt_df = bb_json_txt_df.withColumn('info', F.from_json(F.col('info'), json_schema))
+        bb_json_txt_df.createOrReplaceTempView('info')
+        bb_json_txt_df = spark.sql("SELECT sku_id, info.3p_data as 3p_data, info.additives_info as additives_info, info.additives_info_formatted as additives_info_formatted, \
+                                        info.additives_info_formatted_web as additives_info_formatted_web, info.alcohol as alcohol, info.allergen_other as allergen_other, \
+                                        info.allergen_tag_format as allergen_tag_format, info.allergy_info as allergy_info, info.allergy_info_formatted as allergy_info_formatted,\
+                                        info.allergy_info_formatted_web as allergy_info_formatted_web, info.average_measure_disp as average_measure_disp, \
+                                        info.average_measure_formatted as average_measure_formatted, info.bb_connect as bb_connect, info.bb_new_version, info.box_content_formatted,\
+                                        info.brand_marketing, info.colour, info.consumer_item_number, info.cooking_guidelines, info.country_of_origin, info.defined_area, info.dietary_info, \
+                                        info.dietary_info_formatted, info.distributor_address, info.drained_weight_formatted, info.features_formatted, info.front_of_pack_gda, info.further_desc, \
+                                        info.general_alcohol_data, info.grape_variety, info.importer_address, info.ingrediants_tags, \
+                                        info.ingredients, info.ingredients_formatted, info.manufacturer_marketing, \
+                                        info.manufacturer_path, info.multi_part_product_info, info.nappy,  info.nappy_size,  \
+                                        info.nappy_size_formatted, info.nappy_size_other_txt, info.number_of_units,info.numeric_size, \
+                                        info.nutritional_values, info.other_info, info.other_infos_present, info.pack_size, \
+                                        info.packaging, info.packed_in_path_name, info.packed_in_path_value, info.part, \
+                                        info.place_of_birth, info.place_of_rearing, info.place_of_slaughter, info.preparation_usage, \
+                                        info.product_marketing, info.recipes, info.recommended_storage, info.recycling_info,\
+                                        info.recycling_info_formatted, info.region_of_origin, info.regulated_prd_name, info.return_to,\
+                                        info.safety_warning, info.storage, info.storage_conditions_formatted,\
+                                        info.storage_type, info.storage_usage_formatted, info.taggable_allergy_text,\
+                                        info.taggable_information, info.taggable_ingredients, info.third_pty_logos_formatted,\
+                                        info.unit_free_text, info.unit_specific, info.unit_type,\
+                                        info.weight_formatted, info.wine_alcohol_data, info.wine_alcohol_data_formatted FROM info")
+
+        '''
+		bb_json_txt_df = spark.sql("select *, bb_connect.360_view, bb_connect.comparison_table, bb_connect.document, bb_connect.faq, bb_connect.feature_set, bb_connect.product_tour, \
+                                        bb_connect.video, cooking_guidelines.cooking_guideline, front_of_pack_gda.footers, front_of_pack_gda.front_of_pack_gda_values, front_of_pack_gda.headers, \
+                                        general_alcohol_data.values FROM info")
+        '''
+		bb_json_txt_df.distinct()
+
+        nut_info_df = spark.sql("SELECT distinct sku_id, bb_nutritional_info_json_txt FROM gb_customer_data_domain_raw.cdd_raw_groc_prod" )
+        nut_info_df = nut_info_df.withColumn('nut_info', F.regexp_replace(F.col('bb_nutritional_info_json_txt'), '([a-zA-Z0-9-]+):([a-zA-Z0-9-]+)', "\"$1\":\"$2\""))
+        nut_info_df = nut_info_df.withColumn('nut_info', F.concat(F.lit("["), F.col('nut_info'), F.lit("]")))
+        json_schema = spark.read.option("multiline", "true").json(nut_info_df.rdd.map(lambda row: row.nut_info)).schema
+        nut_info_df = nut_info_df.withColumn('nut_info', F.from_json(F.col('nut_info'), json_schema))
+        nut_info_df.createOrReplaceTempView('nut_info')
+        nut_info_df = spark.sql("SELECT sku_id, nut_info, nut_info.Halal as Halal, nut_info.Vegetarian as Vegetarian, nut_info.Vegan as Vegan, nut_info.SourceofFibre as SourceofFibre, \
+                                        nut_info.nut_info.Ofaday as Ofaday, nut_info.NoSoya as NoSoya, nut_info.NoShellfish as NoShellfish, nut_info.NoSesame as NoSesame, \
+                                        nut_info.NoPeanuts as NoPeanuts, nut_info.NoNuts as NoNuts, nut_info.NoMustard as NoMustard, nut_info.NoMilk as NoMilk, nut_info.NoLupin as NoLupin, \
+                                        nut_info.NoLactose as NoLactose, nut_info.NoGluten as NoGluten, nut_info.NoFish as NoFish, nut_info.NoEgg as NoEgg, nut_info.NoCeleryincludingceleriac as NoCeleryincludingceleriac, \
+                                        nut_info.LowSugar as LowSugar, nut_info.LowSaturatedFat as LowSaturatedFat, nut_info.LowSalt as LowSalt, nut_info.LowFat as LowFat, nut_info.HighFibre as HighFibre, \
+                                        nut_info.Kosher as Kosher FROM nut_info")
+        nut_info_df.distinct()
+
+        nut_val_df = spark.sql("SELECT distinct sku_id, bb_nutritional_val_json_txt FROM gb_customer_data_domain_raw.cdd_raw_groc_prod")
+        nut_val_df = nut_val_df.withColumn('nut_val', F.regexp_replace(F.col('bb_nutritional_val_json_txt'), '([a-zA-Z0-9-]+):([a-zA-Z0-9-.]+)', "\"$1\":\"$2\""))
+        nut_val_df = nut_val_df.withColumn('nut_val', F.concat(F.lit("["), F.col('nut_val'), F.lit("]")))
+        json_schema = spark.read.option("multiline", "true").json(nut_val_df.rdd.map(lambda row: row.nut_val)).schema
+        nut_val_df = nut_val_df.withColumn('nut_val', F.from_json(F.col('nut_val'), json_schema))
+        nut_val_df.createOrReplaceTempView('nut_val')
+        nut_val_df = spark.sql("SELECT sku_id, nut_val, nut_val.carbohydrate as carbohydrate, nut_val.energy as energy, nut_val.fat as fat, nut_val.protein as protein, nut_val.salt as salt \
+                                ,nut_val.saturatedFat as saturatedFat, nut_val.sugar as sugar FROM nut_val")
+
+        nut_val_df.distinct()
+
+        # join data
+        df_final = groc_prod_df.join(nut_info_df, on=[("sku_id")], how='LEFT')
+        df_final = df_final.filter(F.col('nut_info').isNotNull())
+        df_final = df_final.join(nut_val_df, on=[("sku_id")], how='LEFT')
+        df_final = df_final.filter(F.col('nut_val').isNotNull())
+        df_final = df_final.join(bb_json_txt_df, on=[("sku_id")], how='LEFT')
+        df_final = df_final.distinct()
+
+        df_final.printSchema()
+
+        # write to table
+        df_final.write.mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+        print("************** SPARK JOB complete****************")
+
+aa = grocProd()
+aa.run()
+

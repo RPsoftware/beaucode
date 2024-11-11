@@ -1,0 +1,319 @@
+{
+	"name": "quantium_I1831_segments",
+	"properties": {
+		"description": "qpromo_item_brandoverride.parquet processing",
+		"activities": [
+			{
+				"name": "NotebookPreProcessing",
+				"description": "databricks prestage processing jobs",
+				"type": "DatabricksNotebook",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.19:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/3rdparty/quantium/Jobs/CIPSegments"
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_dbr_quantium",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "landingFailureAlert",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "NotebookPreProcessing",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"url": {
+						"value": "@pipeline().globalParameters.laUrl_genericIngestionFrameworkAlerting",
+						"type": "Expression"
+					},
+					"connectVia": {
+						"referenceName": "AutoResolveIntegrationRuntime",
+						"type": "IntegrationRuntimeReference"
+					},
+					"method": "POST",
+					"body": {
+						"value": "{\n'ceEmail': '@{variables('CeEmail')}',\n'subject' : '@{variables('Subject')}',\n'DataFactoryName'  :  '@{pipeline().DataFactory}',\n'Pipeline' :  '@{pipeline().Pipeline}',\n'PipelineRunID' :  '@{pipeline().RunId}',\n'PipelineTriggerID' :  '@{pipeline().TriggerId}',\n\n'sourceTime': 'utcnow()',\n'stage': 'process Item Brand Override',  \n'ErrorDetails' : '@{replace(activity('NotebookPreProcessing').Error.Message,'''','`')}' \n}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "getFileSize",
+				"type": "DatabricksNotebook",
+				"dependsOn": [
+					{
+						"activity": "NotebookPreProcessing",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/3rdparty/quantium/Utils/getFileSize",
+					"baseParameters": {
+						"rawFilePath": {
+							"value": "@concat(pipeline().parameters.sourceID, '/download/', pipeline().globalParameters.env, '/inbound/qpromo/',pipeline().parameters.sourceFilePath)",
+							"type": "Expression"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_dbr_quantium",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "getFileCount",
+				"type": "DatabricksNotebook",
+				"dependsOn": [
+					{
+						"activity": "NotebookPreProcessing",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/3rdparty/quantium/Utils/getFileCount",
+					"baseParameters": {
+						"rawFilePath": {
+							"value": "@concat(pipeline().parameters.sourceID, '/download/', pipeline().globalParameters.env, '/inbound/qpromo/',pipeline().parameters.sourceFilePath)",
+							"type": "Expression"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_dbr_quantium",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "setFileSize",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "getFileSize",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "sourceTotalFileBytes",
+					"value": {
+						"value": "@string(activity('getFileSize').output['runOutput'])",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "setFileCount",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "getFileCount",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "sourceFileCount",
+					"value": {
+						"value": "@string(activity('getFileCount').output['runOutput'])",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "setRecordCount",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "NotebookPreProcessing",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "sourceRecordCount",
+					"value": {
+						"value": "@string(activity('NotebookPreProcessing').output['runOutput'])",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "ingestionMasterWorkFlow",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "setFileSize",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "setFileCount",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "setRecordCount",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "ingestionMasterWorkFlow",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true,
+					"parameters": {
+						"sourceFilePath": {
+							"value": "@concat(pipeline().parameters.sourceID, '/download/', pipeline().globalParameters.env, '/inbound/qpromo/',pipeline().parameters.sourceFilePath)",
+							"type": "Expression"
+						},
+						"entityName": {
+							"value": "@pipeline().parameters.entityName",
+							"type": "Expression"
+						},
+						"askID": {
+							"value": "@pipeline().parameters.askID",
+							"type": "Expression"
+						},
+						"sourceTime": {
+							"value": "@utcnow()",
+							"type": "Expression"
+						},
+						"sourceFileCount": {
+							"value": "@variables('sourceFileCount')",
+							"type": "Expression"
+						},
+						"sourceRecordCount": {
+							"value": "@variables('sourceRecordCount')",
+							"type": "Expression"
+						},
+						"sourceID": {
+							"value": "@pipeline().parameters.sourceID",
+							"type": "Expression"
+						},
+						"sourceTotalFileBytes": {
+							"value": "@variables('sourceTotalFileBytes')",
+							"type": "Expression"
+						}
+					}
+				}
+			}
+		],
+		"parameters": {
+			"askID": {
+				"type": "string",
+				"defaultValue": "i1830"
+			},
+			"entityName": {
+				"type": "string",
+				"defaultValue": "cdd_raw_cip_segments"
+			},
+			"sourceID": {
+				"type": "string",
+				"defaultValue": "quantium"
+			},
+			"sourceFilePath": {
+				"type": "String",
+				"defaultValue": "processed_files/CIP_Segments.parquet"
+			}
+		},
+		"variables": {
+			"CeEmail": {
+				"type": "String"
+			},
+			"Subject": {
+				"type": "String"
+			},
+			"database": {
+				"type": "String"
+			},
+			"sourceTime": {
+				"type": "String"
+			},
+			"srcFileName": {
+				"type": "String"
+			},
+			"sourceFileCount": {
+				"type": "String"
+			},
+			"sourceRecordCount": {
+				"type": "String"
+			},
+			"sourceTotalFileBytes": {
+				"type": "String"
+			},
+			"fileList": {
+				"type": "Array"
+			}
+		},
+		"folder": {
+			"name": "quantium"
+		},
+		"annotations": []
+	}
+}

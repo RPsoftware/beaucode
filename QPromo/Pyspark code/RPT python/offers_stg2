@@ -1,0 +1,181 @@
+from cip.cip.framework.connections.spark import spark
+import datetime
+import subprocess
+import pyspark.sql.functions as F
+
+class rpt_offers:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+
+        #TARGET TABLE
+        self.rpt_db = 'gb_customer_data_domain_rpt'
+        self.target_table = 'cdd_odl_qpromo_offers_stg2'
+
+        #SOURCE TABLES
+        self.odl_db = 'gb_customer_data_domain_odl'
+        self.dih = 'cdd_odl_dim_item_hierarchy'
+
+    def run(self):
+        print("************** SPARK JOB Initiated****************")
+
+		df_promoDaily_New2 = spark.sql(""" select * from gb_customer_data_domain_odl.cdd_odl_qpromo_offers """)
+		
+        df_PromoDaily_New2.createOrReplaceTempView('PromoDaily_New2')
+
+        df_SBfix1 = spark.sql(""" SELECT
+					Item_Barcode
+					,Promo_ID_KEY_LS
+					,Linksave_Total_Price
+					,Linksave_Unit_Price
+					,Asda_Retail_Price_Today
+					,COUNT(*) AS Days_at_price
+					,RANK() OVER (PARTITION BY Item_Barcode,Promo_ID_KEY_LS ORDER BY COUNT(*) DESC ,MIN(Collection_date)) AS rnk
+			FROM PromoDaily_New2
+			WHERE Promo_ID_KEY_LS IS NOT NULL
+			GROUP BY Item_Barcode
+					,Promo_ID_KEY_LS
+					,Linksave_Total_Price
+					,Linksave_Unit_Price
+					,Asda_Retail_Price_Today """)
+        df_SBfix1 = df_SBfix1.filter(F.col("rnk") == 1)
+        df_SBfix1.createOrReplaceTempView("SBfix1")
+
+        df_SBFIX2 = spark.sql("""SELECT
+					Item_Barcode
+					,Promo_ID_KEY_LSSM
+					,Supermarket_Linksave_Total_Price
+					,Supermarket_Linksave_Unit_Price
+					,CASE WHEN Supermarket_SB_Price_Today IS NULL THEN Asda_Retail_Price_Today
+					ELSE Supermarket_SB_Price_Today END AS Asda_Retail_Price_Today
+					,COUNT(*) AS Days_at_price
+					,RANK() OVER (PARTITION BY Item_Barcode,Promo_ID_KEY_LSSM ORDER BY COUNT(*) DESC,MIN(Collection_date)) AS rnk
+			FROM PromoDaily_New2
+			WHERE Promo_ID_KEY_LSSM IS NOT NULL
+			GROUP BY Item_Barcode
+					,Promo_ID_KEY_LSSM
+					,Supermarket_Linksave_Total_Price
+					,Supermarket_Linksave_Unit_Price
+					,CASE WHEN Supermarket_SB_Price_Today IS NULL THEN Asda_Retail_Price_Today
+					ELSE Supermarket_SB_Price_Today END
+					""")
+        df_SBFIX2 = df_SBFIX2.filter(F.col("rnk") == 1)
+        df_SBFIX2.createOrReplaceTempView("SBFIX2")
+
+        df_SBFIX3 = spark.sql("""SELECT
+					Item_Barcode
+					,Promo_ID_KEY_LSCV
+					,Convenience_Linksave_Total_Price
+					,Convenience_Linksave_Unit_Price
+					,CASE WHEN Convenience_SB_Price_Today IS NULL THEN Asda_Retail_Price_Today
+					ELSE Convenience_SB_Price_Today END AS Asda_Retail_Price_Today
+					,COUNT(*) AS Days_at_price
+					,RANK() OVER (PARTITION BY Item_Barcode,Promo_ID_KEY_LSCV ORDER BY COUNT(*) DESC,MIN(Collection_date)) AS rnk
+			FROM PromoDaily_New2
+			WHERE Promo_ID_KEY_LSCV IS NOT NULL
+			AND Convenience_Linksave_Total_Price IS NOT NULL
+			GROUP BY Item_Barcode
+					,Promo_ID_KEY_LSCV
+					,Convenience_Linksave_Total_Price
+					,Convenience_Linksave_Unit_Price
+					,CASE WHEN Convenience_SB_Price_Today IS NULL THEN Asda_Retail_Price_Today
+					ELSE Convenience_SB_Price_Today END
+					""")
+        df_SBFIX3 = df_SBFIX3.filter(F.col("rnk") == 1)
+        df_SBFIX3.createOrReplaceTempView("SBFIX3")
+
+        df_PromoDaily_New_SBFIX = spark.sql(""" SELECT t.*
+				 ,CASE WHEN t.Asda_Retail_Price_Today=SBfix1.Asda_Retail_Price_Today
+								THEN t.Linksave_Total_Price ELSE t.Linksave_Total_Price END AS Linksave_Total_Price_Fixed
+				 ,CASE WHEN t.Asda_Retail_Price_Today=SBfix1.Asda_Retail_Price_Today
+								THEN SBfix1.Linksave_Unit_Price ELSE t.Linksave_Unit_Price END AS Linksave_Unit_Price_Fixed
+				 ,CASE WHEN t.Asda_Retail_Price_Today=SBFIX2.Asda_Retail_Price_Today
+							   THEN SBFIX2.Supermarket_Linksave_Total_Price ELSE t.Supermarket_Linksave_Total_Price END AS Supermarket_Linksave_Total_Price_Fixed
+				 ,CASE WHEN t.Asda_Retail_Price_Today=SBFIX2.Asda_Retail_Price_Today
+						  THEN SBFIX2.Supermarket_Linksave_Unit_Price ELSE t.Supermarket_Linksave_Unit_Price END AS Supermarket_Linksave_Unit_Price_Fixed
+				 ,CASE WHEN t.Asda_Retail_Price_Today=SBFIX3.Asda_Retail_Price_Today
+								THEN SBFIX3.Convenience_Linksave_Total_Price ELSE t.Convenience_Linksave_Total_Price END AS Convenience_Linksave_Total_Price_Fixed
+				 ,CASE WHEN t.Asda_Retail_Price_Today=SBFIX3.Asda_Retail_Price_Today
+								THEN SBFIX3.Convenience_Linksave_Unit_Price ELSE t.Convenience_Linksave_Unit_Price END AS Convenience_Linksave_Unit_Price_Fixed,
+				 CASE WHEN ASDA_promo_type IN ('New Asda Price Drop','Markdown','Rollback Logic','LPED') THEN Promo_Start_Date ELSE NULL END AS NonPromo_Start_Date
+				 ,CASE WHEN ASDA_promo_type IN ('New Asda Price Drop','Markdown','Rollback Logic','LPED') THEN Promo_End_Date ELSE NULL END AS NonPromo_End_Date
+
+						FROM PromoDaily_New2 AS t
+						LEFT JOIN SBfix1
+							ON t.Item_Barcode=SBfix1.Item_Barcode AND t.Promo_ID_KEY_LS=SBfix1.Promo_ID_KEY_LS
+						LEFT JOIN SBFIX2
+							ON t.Item_Barcode=SBFIX2.Item_Barcode AND t.Promo_ID_KEY_LSSM=SBFIX2.Promo_ID_KEY_LSSM
+						LEFT JOIN SBFIX3
+						ON t.Item_Barcode=SBFIX3.Item_Barcode AND t.Promo_ID_KEY_LSCV=SBFIX3.Promo_ID_KEY_LSCV  """)
+
+
+        df_PromoDaily_New_SBFIX.createOrReplaceTempView('PromoDaily_New_SBFIX')
+		
+	    df_Promo_Daily_Final_item_key = spark.sql("""SELECT a.Item_barcode,
+								a.item_key,
+								b.original_cin
+								Collection_Date,
+								ASDA_Promo_Type,
+								NonPromo_Start_Date AS Promo_Start_Date,
+								NonPromo_End_Date AS Promo_End_Date,
+								Rollback_flag,
+								Rollback_prod_Start,
+								Rollback_Prod_End,
+								Promo_ID_Key_RB,
+								Promo_ID_KEY_LS,
+								Promo_ID_Key_Concat,
+								ASDA_linksave_desc,
+								Linksave_Qty_Trigger,
+								Linksave_Total_Price_Fixed,
+								Linksave_Unit_Price_Fixed,
+								Linksave_prod_Start,
+								Linksave_Prod_End,
+								Linksave_Promo_Strt_Dt,
+								Linksave_Promo_End_Dt,
+
+								Supermarket_Linksave_Promo_Strt_Dt,
+								Supermarket_Linksave_Promo_End_Dt,
+								Supermarket_promo_type,
+								Promo_ID_KEY_LSSM,
+								Promo_ID_KEY_RBSM,
+								Promo_ID_KEY_Concat_SM,
+								Supermarket_Linksave_Desc,
+								Supermarket_Linksave_prod_Start,
+								Supermarket_Linksave_prod_End,
+								Supermarket_Linksave_Total_Price_Fixed  ,
+								Supermarket_Linksave_Unit_Price_Fixed,
+								Supermarket_Linksave_Qty_Trigger,
+								Supermarket_Rollback_prod_Start,
+								Supermarket_Rollback_prod_End,
+
+								Convenience_Promo_Type2 AS Convenience_Promo_Type,
+								Convenience_Rollback_prod_Start,
+								Convenience_Rollback_prod_End,
+								Promo_ID_Key_RBCV,
+								Promo_ID_KEY_LSCV,
+								Promo_ID_Key_Concat_CV,
+								Convenience_Linksave_Desc,
+								Convenience_Linksave_prod_Start,
+								Convenience_Linksave_prod_End,
+								Convenience_Linksave_Promo_Strt_Dt,
+								Convenience_Linksave_Promo_End_Dt,
+								Convenience_Linksave_Total_Price_Fixed,
+								Convenience_Linksave_Unit_Price_Fixed,
+								Convenience_Linksave_Qty_Trigger
+
+				FROM PromoDaily_New_SBFIX a
+				LEFT JOIN gb_customer_data_domain_odl.cdd_odl_dim_item_hierarchy b
+				ON a.Item_Barcode = b.upc_nbr  """).repartition("Promo_start_date")
+       
+		spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        spark.conf.set("hive.exec.dynamic.partition", "true")
+        spark.conf.set("hive.exec.dynamic.partition.mode", "nonstrict")
+
+        df_Promo_Daily_Final_item_key.write.partitionBy("PROMO_START_DATE").mode("overwrite").saveAsTable("{}.{}".format(self.odl_db, self.target_table))
+
+        print("*****************END*********************************")
+
+ts = rpt_offers()
+ts.run()
+		

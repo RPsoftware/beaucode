@@ -1,0 +1,43 @@
+API KEY :d739406b-a497-4d7c-8bf6-80d805a544dc
+
+NO FUNDING OR COGS DATA TO BE SENT HERE, quantium setting up seperate blob for funding and cogs data.
+
+To push file to dev blob storage from /user/svc_uk_cust_rdl/extracts/qpromo/: 
+
+1) Request a SAS Token in Hadoop
+
+curl --location --request POST "https://api.demo.quantium.com/storage/uk/api/v1/token" --header "accept: application/json" --header "Authorization: ApiKey d739406b-a497-4d7c-8bf6-80d805a544dc" --header "content-length: 0"
+
+
+curl --location --request POST "https://api.demo.quantium.com/storage/uk/api/v1/token" --header "accept: application/json" --header "Authorization: ApiKey 4d3c008c-e77b-667d-f94b-1effd552cbe1" --header "content-length: 0"
+
+
+2) Recieve response in format below 
+
+{"vendorName":"asda-etl",
+"storageContainerName":"etl",
+"sasToken":"sv=2020-04-08&se=2023-09-05T11%3A48%3A12Z&sr=c&sp=rwdl&sig=ah8zxC4E0b3J9ZZsqn1LJNW7gB0CcoLqBga1T9rYrSg%3D",
+"listContentsUrl":"https://asdauateu2public1dtsa.blob.core.windows.net/etl?sv=2020-04-08&se=2023-07-12T00%3A20%3A31Z&sr=c&sp=rwdl&sig=wt3XL7JSlFf3F5jLtkhgKXOnXNP%2Fpqg4JZJOa0KnJH8%3D&restype=container&comp=list"}
+
+3)Add the SAS Token to the distcp string below and update the file to push:
+
+export DISTCP_PROXY_OPTS="-Dhttps.proxyHost=sysproxy.wal-mart.com -Dhttps.proxyPort=8080"
+hadoop distcp \
+-Dmapreduce.map.java.opts="$DISTCP_PROXY_OPTS" \
+-Dmapreduce.reduce.java.opts="$DISTCP_PROXY_OPTS" \
+-Dmapreduce.map.memory.mb=8192 -Dmapreduce.reduce.memory.mb=8192 \
+-Dmapred.job.queue.name=promoopt \
+-Dfs.azure.sas.etl.asdauateu2public1dtsa.blob.core.windows.net='sv=2020-04-08&se=2023-09-21T18%3A12%3A45Z&sr=c&sp=rwdl&sig=Q6zj2v4C4jKi9q9TPW76jNnbqCshi9Y9t23GcPmyP9Y%3D' \
+/user/svc_uk_cust_rdl/extracts/qpromo/product.parquet \
+wasbs://etl@asdauateu2public1dtsa.blob.core.windows.net/
+
+4) When job has completed, check the contents of the blob storage in a browser:
+
+https://asdauateu2public1dtsa.blob.core.windows.net/etl?sv=2020-04-08&se=2023-04-20T15%3A22%3A19Z&sr=c&sp=rwdl&sig=vutt0CPLJ9TxkeQnSvFFDYnt0%2BnZQDzU%2FvE2f6APBjQ%3D&restype=container&comp=list
+
+
+friday 21st April:
+{"vendorName":"asda-etl","storageContainerName":"etl","sasToken":"sv=2020-04-08&se=2023-04-21T20%3A51%3A37Z&sr=c&sp=rwdl&sig=neRvr8Gx4fbvr7bPZQm3zF%2Bnnq6Z6DQR3t0sBUWOX28%3D","listContentsUrl":"https://asdauateu2public1dtsa.blob.core.windows.net/etl?sv=2020-04-08&se=2023-04-21T20%3A51%3A37Z&sr=c&sp=rwdl&sig=neRvr8Gx4fbvr7bPZQm3zF%2Bnnq6Z6DQR3t0sBUWOX28%3D&restype=container&comp=list"}
+
+sv=2020-04-08&se=2023-05-10T02%3A52%3A59Z&sr=c&sp=rwdl&sig=X5HJvOkhNJTzM7XU5Bx6psUjbQmiDbCTowOakYYTWIw%3D
+https://asdauateu2public1dtsa.blob.core.windows.net/etl?sv=2020-04-08&se=2023-05-10T02%3A52%3A59Z&sr=c&sp=rwdl&sig=X5HJvOkhNJTzM7XU5Bx6psUjbQmiDbCTowOakYYTWIw%3D&restype=container&comp=list

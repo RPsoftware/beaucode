@@ -1,0 +1,37 @@
+drop table if exists gb_customer_data_domain_odl.cdd_odl_pos_seg_choices; 
+create table gb_customer_data_domain_odl.cdd_odl_
+(
+customerid string NULL, 
+source_system_id string NULL, 
+title string NULL, 
+first_name string NULL, 
+middle_name string NULL, 
+last_name string NULL, 
+email_id string NULL, 
+phone_nbr string NULL, 
+pihash string NULL, 
+xref string NULL, 
+guest_order_ind string NULL, 
+billing_first_name string NULL, 
+billing_last_name string NULL, 
+billing_address1 string NULL, 
+billing_address2 string NULL, 
+billing_address3 string NULL, 
+billing_address4 string NULL, 
+billing_address5 string NULL, 
+billing_address6 string NULL, 
+billing_city string NULL, 
+billing_county string NULL, 
+billing_zip_cd string NULL, 
+billing_state string NULL, 
+billing_country string NULL, 
+billing_address string NULL, 
+latitude string NULL, 
+longitude string NULL, 
+blacklist string NULL, 
+cbb_seen string NULL, 
+version string NULL, 
+source string NULL, 
+
+) 
+STORED AS PARQUET; 

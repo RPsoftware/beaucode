@@ -1,0 +1,173 @@
+
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+from datetime import datetime, timedelta
+import pyspark.sql.functions as F
+from pyspark.sql.types import  DecimalType
+
+
+class segTripODL:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_pos_seg_trip"]
+        self.staging_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.trading_hierarchy_table = cnt["Customer_Staging_Mart"]["csm_tables"]["dim_trading_hierarchy"]
+        #self.config_dept_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_pos_seg_trip_config_dept"]
+        #self.config_parm_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_pos_seg_trip_config_parm"]
+        #self.trans_dept_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_pos_transaction_dept"]
+
+
+    def run(self):
+
+        trans_df = spark.sql("SELECT dept_nbr,store_nbr, visit_dt, visit_nbr, load_ts, sale_amt_inc_vat, unmeasured_qty FROM gb_customer_data_domain_odl.cdd_odl_pos_transaction_dept where visit_dt >= '2018-11-01' and visit_dt <= '2019-12-31'")
+        trad_df = spark.sql("SELECT category, CAST(RIGHT(od_number,2) AS INT) as od_number FROM {}.{}".format(self.staging_db, self.trading_hierarchy_table))
+        #dept_df = spark.sql("SELECT * FROM {}.{}".format(self.information_db,self.config_dept_table))
+        dept_df = spark.sql("SELECT * FROM gb_customer_data_domain_odl.cdd_odl_pos_seg_trip_config_dept")
+        #para_df = spark.sql("SELECT * FROM {}.{}".format(self.information_db,self.config_parm_table))
+        para_df = spark.sql("SELECT * FROM gb_customer_data_domain_odl.cdd_odl_pos_seg_trip_config_parm")
+
+        trans_stage1_df = self.getdata(trans_df, trad_df, dept_df)
+        trans_stage2_df = self.getstage2(trans_stage1_df)
+        lower_dict = self.getdictlower(para_df)
+        upper_dict = self.getdictupper(para_df)
+        trans_stage3_df = self.getstage3(trans_stage2_df, lower_dict, upper_dict)
+
+        trans_stage3_df.write.partitionBy('visit_dt').mode("overwrite").saveAsTable("gb_customer_data_domain_odl.cdd_odl_pos_seg_trip")
+
+
+    @staticmethod
+    def getdata (trans_df, trad_df, dept_df):
+
+        trans_dept_df = trans_df.join(dept_df, on=[trans_df.dept_nbr == dept_df.dept], how='LEFT').join(trad_df, on=[trans_df.dept_nbr == trad_df.od_number], how='LEFT')
+
+        #df1 = trans_dept_df.withColumn('grocery_catg1',
+            #F.when((F.col('Grocery').isNotNull()) & (F.col('Grocery')==1), F.col('category')).otherwise('null'))
+
+        #df2 = df1.na.drop(subset=["grocery_catg1"])
+        agg_df = trans_dept_df.groupby("store_nbr", "visit_dt", "visit_nbr").agg((F.max(F.col('load_ts'))).alias('load_ts'), \
+            (F.sum(F.col('sale_amt_inc_vat')).cast(DecimalType(8, 2))).alias('total_spend'),\
+            (F.sum(F.when(F.col('Grocery') == 1, F.col('sale_amt_inc_vat')).otherwise(0)).cast(DecimalType(18,2))).alias('grocery_spend'), \
+            (F.sum(F.when(F.col('Clothing') == 1, F.col('sale_amt_inc_vat')).otherwise(0)).cast(DecimalType(18,2))).alias('cloth_spend'), \
+            (F.sum(F.when(F.col('GM') == 1, F.col('sale_amt_inc_vat')).otherwise(0)).cast(DecimalType(18,2))).alias('gm_spend'), \
+            (F.sum(F.when(F.col('Impulse') == 1, F.col('sale_amt_inc_vat')).otherwise(0)).cast(DecimalType(18,2))).alias('impulse_spend'), \
+            (F.sum(F.when(F.col('Kiosk') == 1, F.col('sale_amt_inc_vat')).otherwise(0)).cast(DecimalType(18,2))).alias('kiosk_spend'), \
+            (F.sum(F.col('unmeasured_qty')).cast(DecimalType(18,2))).alias('total_qty'), \
+            (F.sum(F.when(F.col('Grocery')==1, F.col('unmeasured_qty')).otherwise(0)).cast(DecimalType(18, 2))).alias('grocery_qty'),\
+            (F.countDistinct(F.when(((F.col('Grocery')==1) & (F.col('Grocery').isNotNull())), F.col('category')))).alias('grocery_catg'))
+
+
+
+        #trans_stage1_df = trans_dept_df.join(agg_df, on=[(trans_dept_df.store_nbr==agg_df.store_nbr) & (trans_dept_df.visit_dt==agg_df.visit_dt) & (trans_dept_df.visit_nbr==agg_df.visit_nbr)], how='INNER').drop(agg_df.store_nbr).drop(agg_df.visit_dt).drop(agg_df.visit_nbr).drop(trans_dept_df.load_ts).\
+        trans_stage1_df = agg_df.select("store_nbr", "visit_dt", "visit_nbr", "load_ts", "grocery_catg", "total_spend","grocery_spend", "cloth_spend", "gm_spend", "impulse_spend", "kiosk_spend", "total_qty", "grocery_qty")
+
+
+        return trans_stage1_df
+
+    @staticmethod
+    def getstage2(trans_stage1_df):
+        trans_stage2_df = trans_stage1_df.withColumn('total_spend_zero',F.when(F.col('total_spend').isNull(), 0).otherwise(F.col('total_spend'))) \
+                                    .withColumn('grocery_spend_zero', F.when(F.col('grocery_spend').isNull(), 0).otherwise(F.col('grocery_spend')))
+
+        trans_stage2_df = trans_stage2_df.select("store_nbr", "visit_dt", "visit_nbr", "load_ts", "grocery_catg", "total_spend",
+            "grocery_spend", "cloth_spend", "gm_spend", "impulse_spend", "kiosk_spend", "total_qty", "grocery_qty",
+            ((F.coalesce(((F.col('gm_spend')) / (F.col('total_spend_zero'))), F.lit(0)) * 100).cast(
+                DecimalType(18, 2))).alias('pctgm'), \
+            ((F.coalesce(((F.col('cloth_spend')) / (F.col('total_spend_zero'))), F.lit(0)) * 100).cast(
+                DecimalType(18, 2))).alias('pctcloth'),
+            ((F.coalesce(((F.col('impulse_spend')) / (F.col('total_spend_zero'))), F.lit(0)) * 100).cast(
+                DecimalType(18, 2))).alias('pctimp'),
+            ((F.coalesce(((F.col('kiosk_spend')) / (F.col('grocery_spend_zero'))), F.lit(0)) * 100).cast(
+                DecimalType(18, 2))).alias('pctkiosk'),
+            (F.abs(F.coalesce(((F.col('gm_spend')) / (F.col('total_spend_zero'))), F.lit(0)) * 100).cast(
+                DecimalType(18, 2))).alias('abs_pctgm'),
+            (F.abs(F.coalesce(((F.col('cloth_spend')) / (F.col('total_spend_zero'))), F.lit(0)) * 100).cast(
+                DecimalType(18, 2))).alias('abs_pctcloth'),
+            (F.abs(F.coalesce(((F.col('impulse_spend')) / (F.col('total_spend_zero'))), F.lit(0)) * 100).cast(
+                DecimalType(18, 2))).alias('abs_pctimp'), \
+            (F.abs(F.coalesce(((F.col('kiosk_spend')) / (F.col('grocery_spend_zero'))), F.lit(0)) * 100).cast(
+                DecimalType(18, 2))).alias('abs_pctkiosk'))
+
+        return trans_stage2_df
+
+    @staticmethod
+    def getdictlower (para_df):
+        lower_para_df = para_df.select("parm_id", "lower")
+        lower_dict = lower_para_df.rdd.map(lambda x: (x[0], x[1])).collectAsMap()
+
+        return lower_dict
+
+    @staticmethod
+    def getdictupper(para_df):
+        upper_para_df = para_df.select("parm_id", "upper")
+        upper_dict = upper_para_df.rdd.map(lambda x: (x[0], x[1])).collectAsMap()
+
+        return upper_dict
+
+
+
+    @staticmethod
+    def getstage3(trans_stage2_df, lower_dict, upper_dict):
+
+        trans_stage3_df = trans_stage2_df.select((F.concat((F.date_format(F.col('visit_dt'), "yyyyMMdd")), F.col('store_nbr'), F.col('visit_nbr')).cast(
+            DecimalType(38, 0))).alias('basket_id'),"store_nbr", "visit_dt", "visit_nbr", "load_ts",
+            "grocery_catg", "total_spend", "grocery_spend", "cloth_spend", "gm_spend", "impulse_spend", "kiosk_spend",
+            "total_qty", "grocery_qty", "pctgm", "pctcloth", "pctimp", "pctkiosk",
+            "abs_pctgm", "abs_pctcloth", "abs_pctimp", "abs_pctkiosk",
+            F.when(F.col('pctimp') >= lower_dict.get('gip'), 2)
+                .when(F.col('pctgm') >= lower_dict.get('gp'), 1)
+                .when(F.col('pctcloth') >= lower_dict.get('cp'), 3)
+                .when(F.col('pctkiosk') >= lower_dict.get('kp'), 4)
+                .when(
+                (F.col('grocery_spend') > lower_dict.get('igs')) & (F.col('grocery_spend') <= upper_dict.get('igs')) & (
+                            F.col('grocery_qty') <= upper_dict.get('igq')), 5)
+                .when(
+                (F.col('grocery_spend') > lower_dict.get('sgs')) & (F.col('grocery_spend') <= upper_dict.get('sgs')) & (
+                            F.col('grocery_qty') > lower_dict.get('sgq')), 6)
+                .when((F.col('grocery_spend') > lower_dict.get('sbgs')) & (
+                        F.col('grocery_spend') <= upper_dict.get('sbgs')) & (
+                                  F.col('grocery_qty') <= upper_dict.get('sbgq')) & (
+                                  F.col('grocery_catg') < upper_dict.get('sbgc')), 6)
+                .when((F.col('grocery_spend') > lower_dict.get('stgs')) & (
+                        F.col('grocery_spend') <= upper_dict.get('stgs')) & (
+                                  F.col('grocery_qty') > lower_dict.get('stgq')) & (
+                                  F.col('grocery_catg') > lower_dict.get('stgc')), 8)
+                .when(
+                (F.col('grocery_spend') > lower_dict.get('lbgs')) & (F.col('grocery_spend') <= upper_dict.get('lbgs')),
+                7)
+                .when(
+                (F.col('grocery_spend') > lower_dict.get('tmgs')) & (F.col('grocery_qty') > lower_dict.get('tmgq')) & (
+                            F.col('grocery_qty') <= upper_dict.get('tmgq')), 9)
+                .when(
+                (F.col('grocery_spend') > lower_dict.get('tlgs')) & (F.col('grocery_qty') > lower_dict.get('tlgq')), 10)
+                .when(F.col('grocery_spend') > lower_dict.get('tsgs'), 8)
+                .when(
+                (F.col('grocery_spend') <= upper_dict.get('dggs')) & (F.col('abs_pctgm') > F.col('abs_pctimp')) & (
+                            F.col('abs_pctgm') > F.col('abs_pctcloth')), 1)
+                .when(
+                (F.col('grocery_spend') <= upper_dict.get('digs')) & (F.col('abs_pctimp') > F.col('abs_pctgm')) & (
+                            F.col('abs_pctimp') > F.col('abs_pctcloth')), 2)
+                .when(
+                (F.col('grocery_spend') <= upper_dict.get('dcgs')) & (F.col('abs_pctcloth') > F.col('abs_pctgm')) & (
+                            F.col('abs_pctcloth') > F.col('abs_pctimp')), 3)
+                .when(
+                (F.col('grocery_spend') <= upper_dict.get('tcggs')) & (F.col('abs_pctgm')!=lower_dict.get('tcgap')) & (
+                            F.col('abs_pctgm')==F.col('abs_pctcloth')), 3)
+                .when(
+                (F.col('grocery_spend') <= upper_dict.get('tcigs')) & (F.col('abs_pctimp')!=lower_dict.get('tciap')) & (
+                            F.col('abs_pctimp')==F.col('abs_pctcloth')), 3)
+                .when(
+                (F.col('grocery_spend') <= upper_dict.get('tigs')) & (F.col('abs_pctgm')!=lower_dict.get('tiap')) & (
+                            F.col('abs_pctgm')==F.col('abs_pctimp')), 2)
+                .otherwise('99').alias('triptype_id'))
+
+        return trans_stage3_df
+
+
+
+aa = segTripODL()
+aa.run()

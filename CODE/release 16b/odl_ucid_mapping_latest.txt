@@ -1,0 +1,38 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+
+class unifiedCustomer:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        self.target_table = 'cdd_odl_ucid_mapping_latest'
+
+        # Source Databases
+        self.secure_db = cnt["Customer_Staging_Mart"]["csm_database"]["secured_landing_database"] ##SECURE DB reference!!
+       
+        # Src Tables
+        #self.uct = cnt["Customer_Staging_Mart"]["csm_tables"]["cdd_raw_unified_customer_table"]
+        self.uct = 'cdd_raw_unified_customer_table'
+
+    def run(self):
+  
+        # Ingest data from hive table
+        uct_df = spark.sql("SELECT source_system_id, source, customerid, version, version_date \
+                                                                        FROM {}.{} \
+                                                                        WHERE source = 'sp' OR source = 'store'".format(self.secure_db,self.uct))
+        uct_df.repartition('version_date') 
+
+        # Get latest version of customerid
+        latest_version = uct_df.agg(F.max('version')).collect()[0][0]
+        uct_df = uct_df.where(uct_df.version == latest_version)
+      
+        # WRITE TO TABLE 
+        spark.conf.set("spark.sql.shuffle.partitions", 500)
+        uct_df.write.mode("overwrite").partitionBy('version_date').saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+ts = unifiedCustomer()
+ts.run()

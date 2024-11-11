@@ -1,0 +1,83 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+from pyspark.sql.window import *
+import pyspark.sql.functions as F
+
+class GrocProd:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        #self.target_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["csm_tables"]["dim_groc_prod"]
+        #self.source_db = cnt["Customer_Staging_Mart"]["csm_database"]["landing_database"]
+        #self.source_table = cnt["Datalake"]["source_tables"]["groc_prod"]
+
+
+    def run(self):
+        print("************** SPARK JOB Inititated****************")
+
+        df_gp = spark.sql ('''select row_number() OVER(partition by eu_upc order by upd_dt desc) rn,
+eu_upc, prod_disp_nm,upd_dt,unit_cost_amt ,dept_nbr,brand_nm, picker_desc, cons_item_nbr, sell_uom_cd, prod_status_cd, sell_qty, item_status_cd,sku_id, load_ts, upd_ts, src_pub_dt, prod_size_qty
+FROM gb_product_dl_tables.groc_prod b
+WHERE cons_item_nbr IS NOT NULL
+and eu_upc IS NOT NULL''')
+
+        df_gp = df_output.filter(F.col('rn') == 1).drop('rn')
+		
+		#create temp table for STAGE 1 requirements
+        df_gp.createOrReplaceTempView("gp")
+		
+		df_dim_item_hierarchy = spark.sql('''SELECT im.mds_fam_id,im.item_nbr,im.item_desc_1,im.upc_nbr,im.dept_nbr,th.od_newdesc AS dept_desc,cg.category_id AS catg_id,th.category AS catg_desc,cd.comm_dir_id AS bu_id,th.comm_dir AS bu_desc,td.trad_div_id,th.trad_divn,im.mdse_catg_nbr
+,im.mdse_catg_desc,im.mdse_subcatg_nbr,im.mdse_subcatg_desc,im.subclass_nbr,im.subclass_desc,im.fineline_nbr,im.fineline_desc,im.acctg_dept_nbr,im.vendor_nbr,im.vendor_nm,im.obsolete_dt,im.gp_supplier_id,im.gp_supplier_nm,im.base_unit_rtl_amt
+,im.cust_base_rtl_amt,im.base_rtl_uom_cd,im.base_rtl_uom_desc,im.item_desc_2,im.color_desc,im.size_desc,im.signing_desc,im.upc_desc,im.plu_nbr,im.cons_item_nbr,im.cons_item_desc
+
+,CASE WHEN iv.mds_fam_id IS NOT NULL AND im.cons_item_nbr = 4681411 THEN iv.cons_item_nbr ELSE im.cons_item_nbr END AS original_cin
+
+,im.prod_nbr,im.prod_desc,im.brand_id
+,CASE WHEN im.brand_id = 2 THEN 'Economy_OL'
+WHEN im.brand_id = 5 THEN 'Branded'
+WHEN im.brand_id = 8 THEN 'Premium_OL'
+ELSE 'MidRange_OL' END AS brand_desc
+,im.brand_nm,im.brand_fam_nm,im.item_status_cd,im.item_status_desc,im.item_status_chng_dt,im.item_create_dt,im.item_type_cd,im.item_type_desc,im.asort_type_cd,im.asort_type_desc,im.prime_xref_item_nbr,im.prime_xref_mds_fam_id,im.prime_lia_item_nbr,im.prime_lia_mds_fam_id
+,im.item_len_qty,im.item_ht_qty,im.item_wdth_qty,im.item_dim_uom_cd,im.item_dim_uom_desc,im.item_wt_qty,im.item_wt_uom_cd,im.item_wt_uom_desc,im.item_cube_qty,im.item_cube_uom_cd,im.item_cube_uom_desc,im.item_order_eff_dt,im.item_expire_dt,im.sell_qty,im.sell_uom_cd,im.sell_uom_desc
+,im.sell_pkg_qty,im.sell_unit_qty,im.sell_unit_uom_cd,im.sell_unit_uom_desc,im.all_links_item_nbr,im.all_links_mdse_fam_id,im.acct_nbr,im.acct_nbr_type_cd,im.acct_nbr_type_desc,im.actv_cd,im.actv_desc,im.alcohol_pct,im.catch_wt_ind,im.diet_type_desc
+
+,im.assoc_disc_ind
+
+,im.prime_upc_item_nbr
+,im.prime_upc_mds_fam_id,im.secur_tag_ind,im.send_store_dt,im.shelf_life_dys_qty,im.upc_fmt_cd,im.upc_fmt_desc,im.src_rcv_ts,im.load_ts,im.upd_ts,gp.prod_disp_nm,gp.picker_desc,gp.brand_nm as brand_nm_gp,gp.sell_qty as sell_qty_gp,gp.sell_uom_cd as sell_uom_cd_gp,gp.prod_size_qty,pp.product_type,pp.product_variant
+
+FROM
+gb_customer_data_domain_raw.cdd_raw_dim_item im
+LEFT JOIN
+gb_customer_data_domain_raw.cdd_raw_dim_trading_hierarchy th
+ON im.dept_nbr = CAST(SUBSTRING(th.OD_Number,-2) AS SMALLINT)
+LEFT JOIN
+gb_customer_data_domain_odl.cdd_odl_dim_category cg
+ON trim(th.category) = trim(cg.category)
+LEFT JOIN
+gb_customer_data_domain_odl.cdd_odl_dim_comm_dir cd
+ON trim(th.comm_dir) = trim(cd.comm_dir)
+LEFT JOIN
+gb_customer_data_domain_odl.cdd_odl_dim_trad_divn td
+ON trim(th.trad_divn) = trim(td.trad_divn)
+LEFT JOIN
+ gp
+ON im.cons_item_nbr = gp.cons_item_nbr
+LEFT JOIN
+gb_customer_data_domain_raw.cdd_raw_pricing_product_linkage pp
+ON im.item_nbr = pp.product_id
+LEFT JOIN
+gb_customer_data_domain_raw.cdd_raw_ft_item_versioned iv
+ON im.mds_fam_id = iv.mds_fam_id
+		''')
+
+        df_output.write.mode("overwrite").saveAsTable("gb_customer_data_domain_odl.cdd_odl_dim_item_hierarchy_test1")
+
+        print("**********SPARK JOB complete****************")
+
+
+aa = GrocProd()
+aa.run()
+

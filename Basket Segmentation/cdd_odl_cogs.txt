@@ -1,0 +1,178 @@
+from cip.cip.framework.connections.spark import spark
+from pyspark.sql import SQLContext
+import pyspark.sql.functions as F
+
+class odlCogs:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        self.target_db = 'gb_customer_data_domain_odl'
+        self.target_table = 'cdd_odl_cogs'
+
+    def run(self):
+        print("*******************Execution Start*********************")
+        sqlContext = SQLContext(spark)
+
+        #sdp = spark.sql(""" select * from gb_customer_data_domain_raw.cdd_raw_sku_dly_pos_unpivot_adj where gregorian_date BETWEEN (date_sub(current_date(), 9)) AND (date_sub(current_date(), 3)) """)
+        sdp = spark.sql(""" select * from gb_customer_data_domain_raw.cdd_raw_sku_dly_pos_unpivot_adj where gregorian_date >= '2023-06-01' """)
+        sdp.createOrReplaceTempView("sdp")
+
+        #mds = spark.sql("""select * from gb_customer_data_domain_raw.cdd_raw_qpromo_sku_ty_dly_mumd_unpivot where gregorian_date BETWEEN (date_sub(current_date(), 9)) AND (date_sub(current_date(), 3)) """)
+        mds = spark.sql("""select * from gb_customer_data_domain_raw.cdd_raw_qpromo_sku_ty_dly_mumd_unpivot where gregorian_date >= '2023-06-01' """)
+        mds.createOrReplaceTempView("mds")
+
+        iv = spark.sql(""" select * from gb_customer_data_domain_raw.cdd_raw_qpromo_item_versioned """)
+        iv.createOrReplaceTempView("iv")
+
+        sp_df = spark.sql('''SELECT
+                                p.original_cin,
+                                inr.sale_date AS sale_date,
+                                inr.STORE_NBR AS store_nbr,
+                                inr.ITEM_NBR AS mds_fam_id,
+                                cast(coalesce(inr.item_qty, 0) as int) as in_the_bin_qty,
+                                sum(inr.item_qty * inr.Unit_cost_price) as in_the_bin_cost,
+                                inr.Unit_Cost_Price as unit_cost_price,
+                                cast(SUM(inr.units_sold) as int) AS units_sold,
+                                SUM(inr.Sales_Amount_Excluding_VAT) AS Sales_Amount_Excluding_VAT,
+                                SUM(inr.Sale_Retail_Cost_Amount) AS Sale_Retail_Cost_Amount
+                                FROM (
+
+                                       -- None Catch-Weight
+									   
+	                                       select
+                                        sdp.gregorian_date as sale_date,
+                                        sdp.store_nbr as store_nbr,
+                                        sdp.item_nbr as item_nbr,
+                                        null as item_qty,
+                                        CAST((iv.vnpk_cost_amt / CAST(iv.vnpk_qty AS DECIMAL(18,4))) AS DECIMAL(9,2)) AS unit_cost_price,
+                                        SUM(qty) AS units_sold,
+                                        SUM(sales_amt) AS sales_amount_excluding_vat,
+                                        SUM(sdp.QTY * CAST((iv.vnpk_cost_amt / CAST(iv.vnpk_qty AS DECIMAL(18,4))) AS DECIMAL(9,2))) AS sale_retail_cost_amount
+                                        from sdp
+                                        inner join iv
+                                        on sdp.item_nbr = iv.item_nbr
+                                        and (gregorian_date >= ldm_recordstartdate and gregorian_date < ldm_recordenddate)
+                                        WHERE dept_nbr IN ( 48, 50, 51 ) AND iv.vnpk_weight_fmt_cd != 'V'
+                                        OR iv.dept_nbr NOT IN ( 48, 50, 51 )
+                                        GROUP BY
+                                        sdp.gregorian_date,
+                                        sdp.store_nbr,
+                                        sdp.item_nbr,
+                                        item_qty,
+                                        CAST((iv.vnpk_cost_amt / CAST(iv.vnpk_qty AS DECIMAL(18,4))) AS DECIMAL(9,2))
+
+                                      UNION ALL
+
+                                -- Catch-Weight
+
+                                        SELECT
+                                        inr.gregorian_date,
+                                        inr.store_nbr,
+                                        inr.item_nbr,
+                                        inr.item_qty,
+                                        CASE
+                                        WHEN SUM(inr.units_sold) = 0
+                                        THEN 0
+                                        ELSE SUM(inr.cost_of_sales_amount_excluding_waste) / SUM(inr.units_sold)
+                                        END AS unit_cost_price,
+                                        SUM(inr.units_sold) AS units_sold,
+                                        SUM(inr.sale_amount_excluding_vat) AS sale_amount_excluding_vat,
+                                        SUM(inr.cost_of_sales_amount_excluding_waste) AS cost_of_sales_amount_excluding_waste
+                                        FROM (
+                                        SELECT
+                                        sls.gregorian_date,
+                                        sls.store_nbr,
+                                        iv.item_nbr,
+                                        sls.item_qty,
+                                        sls.units_sold AS units_sold,
+                                        sls.sale_amount_excluding_vat AS sale_amount_excluding_vat,
+                ( CAST( sls.sale_amount_excluding_vat AS FLOAT) - CAST( sls.net_markup_markdown_amount_excluding_in_the_bin AS FLOAT))/ (CAST(iv.base_unit_rtl_amt AS FLOAT)
+                                         * CAST(iv.vnpk_cost_amt AS FLOAT)) / CAST(iv.vnpk_weight_qty AS FLOAT)  AS cost_of_sales_amount_excluding_waste
+                                                FROM (
+                                                        SELECT
+                                                        sdp.gregorian_date,
+                                                        sdp.store_nbr,
+                                                        sdp.item_nbr,
+                                                        sdp.item_qty,
+                                                        SUM(sdp.qty) AS units_sold,
+                                                        SUM(sdp.sales_amt) AS sale_amount_excluding_vat,
+                                                        0 AS net_markup_markdown_amount_excluding_in_the_bin
+                                                        from (Select *, null as item_qty from sdp) sdp
+                                                        inner join iv
+                                                        on sdp.item_nbr = iv.item_nbr
+                                                        and (gregorian_date >= ldm_recordstartdate and gregorian_date < ldm_recordenddate)
+                                                        WHERE dept_nbr IN ( 48, 50, 51 ) AND iv.vnpk_weight_fmt_cd = 'V'
+                                                        GROUP BY
+                                                        sdp.gregorian_date,
+                                                        sdp.store_nbr,
+                                                        sdp.item_nbr,
+                                                        sdp.item_qty
+                                                        HAVING
+                                                        SUM(sdp.sales_amt) != 0
+
+                                                        UNION ALL
+
+                                                        SELECT
+                                                        mds.gregorian_date AS sale_date,
+                                                        mds.store_nbr AS store_nbr,
+                                                        iv.item_nbr AS teradata_item_number,
+                                                        coalesce(mds.item_qty, 0) as item_qty,
+                                                        0 AS units_sold,
+                                                        0 AS sale_amount_excluding_vat,
+                                                        SUM(mds.cur_tot_retl - mds.pre_tot_retl) AS net_markup_markdown_amount_excluding_in_the_bin
+                                                        FROM mds
+                                                        inner join iv
+                                                        on mds.item_nbr = iv.item_nbr
+                                                        and (gregorian_date >= ldm_recordstartdate and gregorian_date < ldm_recordenddate)
+                                                        WHERE dept_nbr IN ( 48, 50, 51 ) AND iv.vnpk_weight_fmt_cd = 'V'
+                                                        --AND event_id not in (5600, 1600, 1814, 5814)
+
+                                                        GROUP BY
+                                                        mds.gregorian_date,
+                                                        mds.store_nbr,
+                                                        iv.item_nbr,
+                                                        mds.item_qty
+                                                        HAVING
+                                                        SUM(mds.cur_tot_retl - mds.pre_tot_retl) <> 0
+                                                        ) AS sls
+
+                                                inner join iv
+                                                on sls.ITEM_NBR = iv.item_nbr
+                                                and (gregorian_date >= ldm_recordstartdate and gregorian_date < ldm_recordenddate)
+                                                ) AS inr
+
+                                        GROUP BY
+                                        inr.GREGORIAN_DATE,
+                                        inr.STORE_NBR,
+                                        inr.ITEM_NBR,
+                                        inr.item_qty
+                                        HAVING
+                                        SUM(inr.units_sold) != 0
+                                        OR SUM(inr.Sale_Amount_Excluding_VAT) != 0
+                                        OR SUM(inr.Cost_Of_Sales_Amount_Excluding_Waste) != 0
+                                        ) AS inr
+
+                                inner join gb_customer_data_domain_odl.cdd_odl_dim_item_hierarchy dih
+                                on dih.mds_fam_id = inr.item_nbr
+
+                                inner join gb_customer_data_domain_rpt.cdd_rpt_product p
+                                on dih.original_cin = p.original_cin
+
+                                where p.original_cin is not null
+
+                                GROUP BY
+                                p.original_cin,
+                                inr.sale_date,
+                                inr.store_nbr,
+                                inr.item_nbr,
+                                inr.item_qty,
+                                inr.unit_cost_price ''')
+
+
+        sp_df.write.mode("overwrite").saveAsTable("{}.{}".format(self.target_db, self.target_table))
+        print("*******************Execution End*********************")
+
+aa = odlCogs()
+aa.run()

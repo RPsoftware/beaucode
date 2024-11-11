@@ -1,0 +1,109 @@
+from marvel.framework.connections.spark import spark
+from marvel.framework.files.read import cnt
+
+# import static references for hdfs from 'py4j.java_gateway.JavaClass'> (conf, filesystem, path, fileutil)
+
+sc = spark.sparkContext
+
+fileutil = sc._jvm.org.apache.hadoop.fs.FileUtil
+hdfs_path = sc._jvm.org.apache.hadoop.fs.Path
+
+filesystem = sc._jvm.org.apache.hadoop.fs.FileSystem
+jvm_conf = sc._jsc.hadoopConfiguration()
+hdfs_fs = filesystem.get(jvm_conf)
+
+
+
+class loyaltyOfferSeg:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        self.source_db = cnt["Customer_Staging_Mart"]["cdd_rpt_database"]["secured_reporting_database"]
+        self.source_table = cnt["Customer_Staging_Mart"]["csm_rpt_tables"]["rpt_loyalty_account"]
+        self.file_path = str(cnt["run_path"]["root_path"]) + str(cnt["file_path"]["InfinityWorks"]["output"])
+        # /user/svc_uk_cust_rdl/marvel_extracts/infinityworks/
+
+    def file_run(self):
+        print("************** SPARK JOB Initiated for offer allocation extract ****************")
+
+        query = "SELECT wallet_id AS Wallet_Id, 100 AS Cust_Seg_Id, to_date(wallet_create_ts) AS Cust_Val_Id FROM {}.{} WHERE acct_status_id IN ('Full','Temp')"
+
+        offer_df = spark.sql(query.format(self.source_db, self.source_table))
+
+        #coalesce to write the data into one csv part
+        offer_df.coalesce(1).write.mode('overwrite').option("compression","none").option("header","true").option("delimiter","|").csv(self.file_path)
+        print("Writing offer_allocation csv in ... " + self.file_path)
+
+
+class fileSender:
+
+    def __init__(self):
+        self.file_read_path = str(cnt["run_path"]["root_path"]) + str(cnt["file_path"]["InfinityWorks"]["output"])
+
+
+    def file_send(self):
+
+
+        # **** read from dir prt_files & copy to dir seg_files ****
+
+        # COPY from HDFS to ADLS
+
+        # HDFS FileSystem
+        fs_path = hdfs_path
+
+        # blob storage variables
+        storageAccount = "dlsloyaltybaseprod001"
+        storageKey = "sp=racwdlmo&st=2022-08-01T13:48:24Z&se=2023-02-01T22:48:24Z&spr=https&sv=2021-06-08&sr=c&sig=ASb6XjsBzf2%2BnRY%2BCydh7TW0fDwogZls4NspfwjbJsM%3D"
+        blobContainer = "data"
+        folder_filepath = "in/segments"
+        azure_blob_fileoutstr = "wasbs://" + blobContainer + "@" + storageAccount + ".blob.core.windows.net/" + folder_filepath
+        print("azure BLOB path is " + azure_blob_fileoutstr)
+
+
+        # adls configuration
+        configadls_storageAccount = "fs.azure.sas." + blobContainer + "." + storageAccount + ".blob.core.windows.net"
+        jvm_conf.set(configadls_storageAccount, storageKey)
+        # Getting File System reference fs FROM - path().getFileSystem method
+        azure_fs = fs_path(azure_blob_fileoutstr).getFileSystem(jvm_conf)
+
+        srcfs = hdfs_fs
+        dstfs = azure_fs
+
+        # delete any existing files in the ADLS directory, before the cloning run
+        file_list_dir_adls = dstfs.listStatus(fs_path(azure_blob_fileoutstr))
+        for file_del in file_list_dir_adls:
+            filenm_del = file_del.getPath().getName()
+            print("deleting file ... " + filenm_del + " from " + azure_blob_fileoutstr)
+            dstfs.delete(fs_path(azure_blob_fileoutstr + "/" + filenm_del))
+            print("deleted file from BLOB..." + azure_blob_fileoutstr + "/" + filenm_del)
+
+            # read_source_path
+        hdfs_dir_readcopyfrom = self.file_read_path
+        # /user/svc_uk_cust_rdl/marvel_extracts/infinityworks/
+
+        if srcfs.exists(fs_path(hdfs_dir_readcopyfrom)):
+            file_list_dir_hdfs = srcfs.listStatus(fs_path(hdfs_dir_readcopyfrom))
+            print("reading..copy from " + hdfs_dir_readcopyfrom)
+
+            # foreach file in report source directory
+            for file_cp in file_list_dir_hdfs:
+                filenm_copy = file_cp.getPath().getName()
+                if not (filenm_copy == "_SUCCESS"):
+                    srcpath = fs_path(hdfs_dir_readcopyfrom + filenm_copy)
+                    dstpath = fs_path(azure_blob_fileoutstr)
+
+                    fileutil.copy(srcfs, srcpath, dstfs, dstpath, False, jvm_conf)
+                    print("file copied... " + filenm_copy + " from " + hdfs_dir_readcopyfrom + " to " + azure_blob_fileoutstr)
+            # end for file_list_dir_prt
+        print("********************* SPARK JOB COMPLETED *********************")
+        # endif
+
+
+ts = loyaltyOfferSeg()
+ts.file_run()
+
+iw_ext_snd = fileSender()
+iw_ext_snd.file_send()
+

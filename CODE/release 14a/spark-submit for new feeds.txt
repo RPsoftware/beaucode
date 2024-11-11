@@ -1,0 +1,32 @@
+
+export SPARK_MAJOR_VERSION=2
+export PYSPARK_PYTHON=/u/users/appaorta/custom_python/anaconda/envs/cdd_py_env/bin/python
+export PYSPARK_DRIVER_PYTHON=/u/users/appaorta/custom_python/anaconda/envs/cdd_py_env/bin/python
+nohup \
+spark-submit --master yarn --deploy-mode cluster --queue default \
+--driver-memory 16G    --num-executors 20 --executor-memory 10G --executor-cores 2 \
+--conf spark.ui.port=5051 --conf spark.yarn.executor.memoryOverhead=2G \
+--conf spark.sql.parquet.writeLegacyFormat=True \
+--archives hdfs://ukprod1ha/user/svc_uk_cust_rdl/cdd_py_env.zip#cdd_python \
+--conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cdd_python/cdd_py_env/bin/python \
+--conf spark.yarn.dist.archives=hdfs://prod16ha/user/rvalle2/cdd_py_env#cdd_python \
+--conf spark.yarn.appMasterEnv.PYSPARK_DRIVER_PYTHON=./cdd_python/cdd_py_env/bin/python \
+--py-files hdfs://ukprod1ha/user/svc_uk_cust_rdl/cdw.zip  \
+/u/users/svc_uk_cust_rdl/asda_customer_ecosystem/Customer_Ecosystem/cdw/jobs/staging/cdw_raw_generic_data_ingestion.py -f 'BRANCH_COMP_STATUS' &
+
+
+
+export SPARK_MAJOR_VERSION=2
+export PYSPARK_PYTHON=/u/users/appaorta/custom_python/anaconda/envs/cdd_py_env/bin/python
+export PYSPARK_DRIVER_PYTHON=/u/users/appaorta/custom_python/anaconda/envs/cdd_py_env/bin/python
+nohup \
+spark-submit --master yarn --deploy-mode cluster --queue default \
+--driver-memory 16G    --num-executors 20 --executor-memory 10G --executor-cores 2 \
+--conf spark.ui.port=5051 --conf spark.yarn.executor.memoryOverhead=2G \
+--conf spark.sql.parquet.writeLegacyFormat=True \
+--archives hdfs://ukprod1ha/user/svc_uk_cust_rdl/cdd_py_env.zip#cdd_python \
+--conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cdd_python/cdd_py_env/bin/python \
+--conf spark.yarn.dist.archives=hdfs://prod16ha/user/rvalle2/cdd_py_env#cdd_python \
+--conf spark.yarn.appMasterEnv.PYSPARK_DRIVER_PYTHON=./cdd_python/cdd_py_env/bin/python \
+--py-files hdfs://ukprod1ha/user/svc_uk_cust_rdl/cdw.zip  \
+/u/users/svc_uk_cust_rdl/asda_customer_ecosystem/Customer_Ecosystem/cdw/jobs/staging/cdw_raw_generic_data_ingestion.py -f 'CDW_CALENDAR' &

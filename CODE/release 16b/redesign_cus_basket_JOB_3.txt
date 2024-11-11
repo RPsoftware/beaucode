@@ -1,0 +1,41 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+import pyspark.sql.functions as F
+ 
+class customerBasket:
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # Target Table
+        self.target_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+        #self.target_table = cnt["Customer_Staging_Mart"]["cdd_odl_tables"]["cdd_odl_customer_basket"]
+        self.target_table = 'cdd_odl_redesign_customer_basket' ## update to cdd_odl_customer_basket in final version ##
+ 
+        # Source Database
+        self.information_db = cnt["Customer_Staging_Mart"]["cdd_odl_database"]["information_database"]
+ 
+        # Src Tables
+        self.sp = 'cdd_odl_redesign_customer_basket_sp'
+        self.store = 'cdd_odl_redesign_customer_basket_store'
+ 
+    def run(self):
+ 
+        # Ingest data from hive tables and store as df for later transformation and joins
+        sp_df = spark.sql("SELECT * FROM {}.{} ".format(self.information_db,self.sp))
+	store_df = spark.sql("SELECT * FROM {}.{} ".format(self.information_db, self.store))
+ 
+        cb_df = sp_df.union(store_df)\
+        .select('unified_cust_id','basket_id', 'store_nbr','visit_dt','visit_nbr','channel_id','ghs_order_id', 'sng_cart_id', 'wallet_id', 'lead_xref')
+        return (cb_df)
+
+ 
+        # WRITE TO TABLE
+        spark.conf.set("spark.sql.shuffle.partitions", 500)
+        cb_df.write.mode("overwrite").partitionBy('visit_dt').saveAsTable("{}.{}".format(self.target_db, self.target_table))
+  
+ts = customerBasket()
+ts.run()
+
+
+

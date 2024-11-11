@@ -1,0 +1,47 @@
+{
+	"name": "tr_quantium_processing",
+	"properties": {
+		"annotations": [],
+		"runtimeState": "Started",
+		"pipelines": [
+			{
+				"pipelineReference": {
+					"referenceName": "quantium_I1830_segments",
+					"type": "PipelineReference"
+				}
+			},
+			{
+				"pipelineReference": {
+					"referenceName": "quantium_I1829_ibo",
+					"type": "PipelineReference"
+				}
+			},
+			{
+				"pipelineReference": {
+					"referenceName": "quantium_I1828_qpromoInbound",
+					"type": "PipelineReference"
+				}
+			},
+			{
+				"pipelineReference": {
+					"referenceName": "quantium_I1833_custactivity",
+					"type": "PipelineReference"
+				}
+			}
+		],
+		"type": "ScheduleTrigger",
+		"typeProperties": {
+			"recurrence": {
+				"frequency": "Day",
+				"interval": 1,
+				"startTime": "2024-01-24T07:01:00",
+				"timeZone": "GMT Standard Time",
+				"schedule": {
+					"hours": [
+						7
+					]
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,23 @@
+{
+	"name": "ls_dbr_quantium",
+	"properties": {
+		"annotations": [],
+		"type": "AzureDatabricks",
+		"typeProperties": {
+			"domain": "https://adb-2824573558779022.2.azuredatabricks.net",
+			"accessToken": {
+				"type": "AzureKeyVaultSecret",
+				"store": {
+					"referenceName": "ls_kv_central",
+					"type": "LinkedServiceReference"
+				},
+				"secretName": "dbr-central-access"
+			},
+			"existingClusterId": "0626-200042-obs7hlot"
+		},
+		"connectVia": {
+			"referenceName": "selfHostedADFRuntime01",
+			"type": "IntegrationRuntimeReference"
+		}
+	}
+}

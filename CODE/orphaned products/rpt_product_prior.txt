@@ -1,0 +1,33 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+
+class rptPrior:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+
+        # Source Databases
+        self.report_db = cnt["Customer_Staging_Mart"]["cdd_rpt_database"]["extraction_database"]
+
+        # source tables
+        self.source_table = cnt["Customer_Staging_Mart"]["cdd_rpt_tables"]["cdd_rpt_cip_product"]
+
+        # target tables
+        self.target_table = cnt["Customer_Staging_Mart"]["cdd_rpt_tables"]["cdd_rpt_cip_product_prior"]
+
+
+    def run(self):
+        print("****************Execution Start****************")
+
+        # pull data required from rpt_product
+        rpt_product_df = spark.sql("SELECT * FROM {}.{}".format(self.report_db,self.source_table))
+
+        rpt_product_df.write.mode("overwrite").saveAsTable("{}.{}".format(self.report_db, self.target_table))
+
+        print("************** SPARK JOB complete****************")
+
+ts = rptPrior()
+ts.run()
+~               

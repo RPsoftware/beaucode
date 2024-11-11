@@ -1,0 +1,163 @@
+
+--TO GET THE CORRECT COUNT OF NUMBER OF ROWS USE THIS CODE --
+with a as (select distinct
+t1.cmpgn_id,
+t2.cmpgn_nm,
+t2.reward_pnt_qty,
+t2.cmpgn_type_nm,
+cast(cast(t2.cmpgn_start_ts as timestamp) as date) as cmpgn_start_dt,
+cast(cast(t2.cmpgn_end_ts as timestamp) as date) as cmpgn_end_dt,
+cast(t4.cons_item_nbr as varchar) as orignial_cin
+from (select * from CustomerDataDomain.ODL."cmpgn_products" where  cmpgn_prod_level_nm = 'upc_nbr' and cmpgn_status_desc in ('ACTIVE', 'EXPIRED'))  t1 
+inner join CustomerDataDomain.ODL."cmpgn_setup" t2
+on t1.cmpgn_id = cast(t2.cmpgn_id as bigint)
+left join CustomerDataDomain.ODL."dim_item_hierarchy" t4
+on cast(substr(t1.cmpgn_prod_id,1,length(t1.cmpgn_prod_id)-1) as bigint) = t4.upc_nbr
+where t2.cmpgn_id not in (398111,398190)
+and (t2.cmpgn_tag_array like '%OPENSP%' or t2.cmpgn_tag_array like '%STARPRODUCT%' or t2.cmpgn_tag_array like '%SUPERSTAR%')
+and t4.cons_item_nbr IS NOT NULL
+
+ union
+
+select distinct t3.cmpgn_id,
+                t3.cmpgn_nm,
+                t3.reward_pnt_qty,
+                t3.cmpgn_type_nm,
+                t3.cmpgn_start_dt,
+                t3.cmpgn_end_dt,
+                t4.cons_item_nbr
+from (select distinct t1.cmpgn_id,
+                t2.cmpgn_nm,
+                t2.cmpgn_type_nm,
+                t2.reward_pnt_qty,
+                cast(cast(t2.cmpgn_start_ts as timestamp) as date) as cmpgn_start_dt,
+                cast(cast(t2.cmpgn_end_ts as timestamp) as date) as cmpgn_end_dt,
+                t1.cmpgn_prod_id as dept_nbr
+from CustomerDataDomain.ODL."cmpgn_products" t1
+inner join CustomerDataDomain.ODL."cmpgn_setup" t2
+on t1.cmpgn_id = cast(t2.cmpgn_id as bigint)
+where t1.cmpgn_prod_level_nm = 'dept_nbr'
+and t1.cmpgn_status_desc in ('ACTIVE', 'EXPIRED')
+and t2.cmpgn_nm like '%10\%%' ESCAPE '\'
+and t2.cmpgn_id not in (398111,398190)
+and (t2.cmpgn_tag_array like '%OPENSP%' or t2.cmpgn_tag_array like '%STARPRODUCT%'
+or t2.cmpgn_tag_array like '%SUPERSTAR%')) t3
+inner join CustomerDataDomain.ODL."dim_item_hierarchy" t4
+on t3.dept_nbr = t4.dept_nbr and t4.item_status_cd = 'A'
+where t4.cons_item_nbr IS NOT NULL
+
+ union
+
+select distinct t3.cmpgn_id,
+t3.cmpgn_nm,
+t3.reward_pnt_qty,
+t3.cmpgn_type_nm,
+t3.cmpgn_start_dt,
+t3.cmpgn_end_dt,
+t4.cons_item_nbr
+from
+(select distinct t1.cmpgn_id,
+t2.cmpgn_nm,
+t2.reward_pnt_qty,
+t2.cmpgn_type_nm,
+cast(cast(t2.cmpgn_start_ts as timestamp) as date) as cmpgn_start_dt,
+cast(cast(t2.cmpgn_end_ts as timestamp) as date) as cmpgn_end_dt,
+t1.cmpgn_prod_id as dept_ppg,
+substr(t1.cmpgn_prod_id,1,position('-' in t1.cmpgn_prod_id) - 1) as dept_nbr,
+substr(t1.cmpgn_prod_id, position('-'in t1.cmpgn_prod_id) + 1, length(t1.cmpgn_prod_id)) as fineline_nbr
+from CustomerDataDomain.ODL."cmpgn_products" t1
+inner join CustomerDataDomain.ODL."cmpgn_setup" t2
+on t1.cmpgn_id = cast(t2.cmpgn_id as bigint)
+where t1.cmpgn_prod_level_nm = 'fineline_nbr'
+and t1.cmpgn_status_desc in ('ACTIVE', 'EXPIRED')
+and t2.cmpgn_nm like '%10!%%' ESCAPE '!'
+and t2.cmpgn_id not in (398111,398190)
+and (t2.cmpgn_tag_array like '%OPENSP%' or t2.cmpgn_tag_array like '%STARPRODUCT%'
+or t2.cmpgn_tag_array like '%SUPERSTAR%')) t3
+inner join CustomerDataDomain.ODL."dim_item_hierarchy" t4
+on t3.dept_nbr = t4.dept_nbr and t3.fineline_nbr = t4.fineline_nbr
+where t4.item_status_cd = 'A'
+and t4.cons_item_nbr IS NOT NULL
+) 
+
+select count(*) from a
+
+--TO LOOK AT A SAMPEL OF RECORDS USE THIS CODE--
+select distinct
+t1.cmpgn_id,
+t2.cmpgn_nm,
+t2.reward_pnt_qty,
+t2.cmpgn_type_nm,
+cast(cast(t2.cmpgn_start_ts as timestamp) as date) as cmpgn_start_dt,
+cast(cast(t2.cmpgn_end_ts as timestamp) as date) as cmpgn_end_dt,
+cast(t4.cons_item_nbr as varchar) as orignial_cin
+from (select * from CustomerDataDomain.ODL."cmpgn_products" where  cmpgn_prod_level_nm = 'upc_nbr' and cmpgn_status_desc in ('ACTIVE', 'EXPIRED'))  t1 
+inner join CustomerDataDomain.ODL."cmpgn_setup" t2
+on t1.cmpgn_id = cast(t2.cmpgn_id as bigint)
+left join CustomerDataDomain.ODL."dim_item_hierarchy" t4
+on cast(substr(t1.cmpgn_prod_id,1,length(t1.cmpgn_prod_id)-1) as bigint) = t4.upc_nbr
+where t2.cmpgn_id not in (398111,398190)
+and (t2.cmpgn_tag_array like '%OPENSP%' or t2.cmpgn_tag_array like '%STARPRODUCT%' or t2.cmpgn_tag_array like '%SUPERSTAR%')
+and t4.cons_item_nbr IS NOT NULL
+
+ union
+
+select distinct t3.cmpgn_id,
+                t3.cmpgn_nm,
+                t3.reward_pnt_qty,
+                t3.cmpgn_type_nm,
+                t3.cmpgn_start_dt,
+                t3.cmpgn_end_dt,
+                t4.cons_item_nbr
+from (select distinct t1.cmpgn_id,
+                t2.cmpgn_nm,
+                t2.cmpgn_type_nm,
+                t2.reward_pnt_qty,
+                cast(cast(t2.cmpgn_start_ts as timestamp) as date) as cmpgn_start_dt,
+                cast(cast(t2.cmpgn_end_ts as timestamp) as date) as cmpgn_end_dt,
+                t1.cmpgn_prod_id as dept_nbr
+from CustomerDataDomain.ODL."cmpgn_products" t1
+inner join CustomerDataDomain.ODL."cmpgn_setup" t2
+on t1.cmpgn_id = cast(t2.cmpgn_id as bigint)
+where t1.cmpgn_prod_level_nm = 'dept_nbr'
+and t1.cmpgn_status_desc in ('ACTIVE', 'EXPIRED')
+and t2.cmpgn_nm like '%10\%%' ESCAPE '\'
+and t2.cmpgn_id not in (398111,398190)
+and (t2.cmpgn_tag_array like '%OPENSP%' or t2.cmpgn_tag_array like '%STARPRODUCT%'
+or t2.cmpgn_tag_array like '%SUPERSTAR%')) t3
+inner join CustomerDataDomain.ODL."dim_item_hierarchy" t4
+on t3.dept_nbr = t4.dept_nbr and t4.item_status_cd = 'A'
+where t4.cons_item_nbr IS NOT NULL
+
+ union
+
+select distinct t3.cmpgn_id,
+t3.cmpgn_nm,
+t3.reward_pnt_qty,
+t3.cmpgn_type_nm,
+t3.cmpgn_start_dt,
+t3.cmpgn_end_dt,
+t4.cons_item_nbr
+from
+(select distinct t1.cmpgn_id,
+t2.cmpgn_nm,
+t2.reward_pnt_qty,
+t2.cmpgn_type_nm,
+cast(cast(t2.cmpgn_start_ts as timestamp) as date) as cmpgn_start_dt,
+cast(cast(t2.cmpgn_end_ts as timestamp) as date) as cmpgn_end_dt,
+t1.cmpgn_prod_id as dept_ppg,
+substr(t1.cmpgn_prod_id,1,position('-' in t1.cmpgn_prod_id) - 1) as dept_nbr,
+substr(t1.cmpgn_prod_id, position('-'in t1.cmpgn_prod_id) + 1, length(t1.cmpgn_prod_id)) as fineline_nbr
+from CustomerDataDomain.ODL."cmpgn_products" t1
+inner join CustomerDataDomain.ODL."cmpgn_setup" t2
+on t1.cmpgn_id = cast(t2.cmpgn_id as bigint)
+where t1.cmpgn_prod_level_nm = 'fineline_nbr'
+and t1.cmpgn_status_desc in ('ACTIVE', 'EXPIRED')
+and t2.cmpgn_nm like '%10!%%' ESCAPE '!'
+and t2.cmpgn_id not in (398111,398190)
+and (t2.cmpgn_tag_array like '%OPENSP%' or t2.cmpgn_tag_array like '%STARPRODUCT%'
+or t2.cmpgn_tag_array like '%SUPERSTAR%')) t3
+inner join CustomerDataDomain.ODL."dim_item_hierarchy" t4
+on t3.dept_nbr = t4.dept_nbr and t3.fineline_nbr = t4.fineline_nbr
+where t4.item_status_cd = 'A'
+and t4.cons_item_nbr IS NOT NULL
