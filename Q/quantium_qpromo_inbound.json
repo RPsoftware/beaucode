@@ -1,0 +1,275 @@
+{
+	"name": "quantium_qpromo_inbound",
+	"properties": {
+		"activities": [
+			{
+				"name": "ForEachFile",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "SwitchFileList",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@variables('fileList')",
+						"type": "Expression"
+					},
+					"isSequential": true,
+					"activities": [
+						{
+							"name": "ingestionMasterWorkFlow",
+							"type": "ExecutePipeline",
+							"dependsOn": [
+								{
+									"activity": "getMetadata",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"pipeline": {
+									"referenceName": "ingestionMasterWorkFlow",
+									"type": "PipelineReference"
+								},
+								"waitOnCompletion": true,
+								"parameters": {
+									"sourceFilePath": {
+										"value": "@concat('download/', pipeline().globalParameters.env, '/inbound/qpromo/processed_files/', item())",
+										"type": "Expression"
+									},
+									"entityName": {
+										"value": "@activity('getMetadata').output.firstRow.entityName",
+										"type": "Expression"
+									},
+									"askID": {
+										"value": "@activity('getMetadata').output.firstRow.askID",
+										"type": "Expression"
+									},
+									"sourceTime": {
+										"value": "@utcnow()",
+										"type": "Expression"
+									},
+									"sourceFileCount": "0",
+									"sourceRecordCount": "0",
+									"sourceID": "quantium",
+									"sourceTotalFileBytes": "0"
+								}
+							}
+						},
+						{
+							"name": "getMetadata",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "SqlDWSource",
+									"sqlReaderQuery": {
+										"value": "@concat('select distinct askid, entityname, fileName FROM [admin].[genericIngestionMetadata] where filename = ''', toLower(item()), '''')",
+										"type": "Expression"
+									},
+									"queryTimeout": "02:00:00",
+									"partitionOption": "None"
+								},
+								"dataset": {
+									"referenceName": "ds_quantium_lookup",
+									"type": "DatasetReference"
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "preStageProcessing",
+				"description": "download blobs from quantium storage account, process data ready for ingestion",
+				"type": "DatabricksNotebook",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.19:00:00",
+					"retry": 4,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/3rdparty/quantium/processingBlobs"
+				},
+				"linkedServiceName": {
+					"referenceName": "ls_dbr_quantium",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "landingFailureAlert",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "preStageProcessing",
+						"dependencyConditions": [
+							"Failed"
+						]
+					},
+					{
+						"activity": "SwitchFileList",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"url": {
+						"value": "@pipeline().globalParameters.laUrl_genericIngestionFrameworkAlerting",
+						"type": "Expression"
+					},
+					"connectVia": {
+						"referenceName": "AutoResolveIntegrationRuntime",
+						"type": "IntegrationRuntimeReference"
+					},
+					"body": {
+						"value": "{\n'ceEmail': '@{variables('CeEmail')}',\n'subject' : '@{variables('Subject')}',\n'DataFactoryName'  :  '@{pipeline().DataFactory}',\n'Pipeline' :  '@{pipeline().Pipeline}',\n'PipelineRunID' :  '@{pipeline().RunId}',\n'PipelineTriggerID' :  '@{pipeline().TriggerId}',\n'sourceTime': 'utcnow()',\n}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "SwitchFileList",
+				"type": "Switch",
+				"dependsOn": [
+					{
+						"activity": "preStageProcessing",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"on": {
+						"value": "@string(dayOfWeek(utcNow()))",
+						"type": "Expression"
+					},
+					"cases": [
+						{
+							"value": "1",
+							"activities": [
+								{
+									"name": "MondayFiles",
+									"type": "SetVariable",
+									"dependsOn": [],
+									"policy": {
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"variableName": "fileList",
+										"value": {
+											"value": "@createArray('CustomerActivity.parquet', 'events.parquet', 'CIPSegments.parquet', 'qpromo_item_brandoverride.parquet')",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						},
+						{
+							"value": "3",
+							"activities": [
+								{
+									"name": "WednesdayFiles",
+									"type": "SetVariable",
+									"dependsOn": [],
+									"policy": {
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"variableName": "fileList",
+										"value": {
+											"value": "@createArray('qpromotions.parquet', 'events.parquet')",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						}
+					],
+					"defaultActivities": [
+						{
+							"name": "EverydayFileList",
+							"type": "SetVariable",
+							"dependsOn": [],
+							"policy": {
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "fileList",
+								"value": {
+									"value": "@createArray('events.parquet')",
+									"type": "Expression"
+								}
+							}
+						}
+					]
+				}
+			}
+		],
+		"variables": {
+			"CeEmail": {
+				"type": "String",
+				"defaultValue": "@if(contains(pipeline().DataFactory , '-prod-' ), 'asdadataincidentsupportalerts@asda.uk' , 'asdadataincidentsupportcommsnonprod@asda.uk' )"
+			},
+			"Subject": {
+				"type": "String",
+				"defaultValue": "quantium data ingestion failure"
+			},
+			"fileList": {
+				"type": "Array",
+				"defaultValue": [
+					"CustomerActivity.parquet",
+					"qpromo_item_brandoverride.parquet",
+					"qpromotions.parquet",
+					"events.parquet",
+					"CIPSegments.parquet"
+				]
+			},
+			"askID": {
+				"type": "String"
+			}
+		},
+		"folder": {
+			"name": "quantium"
+		},
+		"annotations": []
+	}
+}
