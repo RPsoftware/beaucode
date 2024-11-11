@@ -1,0 +1,37 @@
+#check whether the storage is mounted
+mount_point = "/mnt/ADLS/general" #name of mount point to check for
+
+if all(mount.mountPoint != mount_point for mount in dbutils.fs.mounts()): #check if mount point already exists
+   
+        print(f"adding mount point - {mount_point}") #add mount point
+        dbutils.fs.mount(
+            source = f"wasbs://{container_name}@{storage_name}.blob.core.windows.net",
+            mount_point = {mount_point},
+            extra_configs = config
+        )
+
+        print(f"mount point added")
+else :
+    print(f"currently mounted") # if mount exists, print message 
+	
+
+###create csv file 
+path = mount_point+"/cdp2/outbound"
+filename = 'out_recommendation_CDP.csv'
+recommendation_final_v2.coalesce(1).write.mode("overwrite").options(header='True').csv("{}/{}".format(path,filename))
+
+###look for part file and move to new destination, renaming in process.
+file_path = (path+"/recommendation")
+#look for .csv file to rename and move to outbound folder ready for transfer to sales force 
+for file in dbutils.fs.ls(file_path):
+    if file.name.endswith(".csv") :
+        filename = file.name
+
+source = file_path+"/"+filename
+new_filename = "out_recommendation_CPD.csv"
+destination = path+"/"+new_filename
+
+dbutils.fs.mv(source, destination)
+
+
+
