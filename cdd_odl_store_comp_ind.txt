@@ -1,0 +1,68 @@
+from cip.cip.framework.connections.spark import spark
+from cip.cip.framework.files.read import cnt
+from datetime import date, timedelta
+import pyspark.sql.functions as F
+
+class store_comp_ind:
+
+    def __init__(self):
+        """
+        Assigning Variable from config file
+        """
+        # raw tables
+        self.source_db = cnt['Customer_Staging_Mart']['csm_database']['landing_database']
+        self.raw_calendar_table = 'cdd_raw_dim_calendar_cdw'
+        self.raw_branch_comp_table = 'cdd_raw_branch_comp_status'
+        self.raw_branch_table = 'cdd_raw_dim_branch'
+        #self.raw_calendar_table = cnt['Customer_Staging_Mart']['csm_tabels']['dim_calendar_cdw']
+        #self.raw_branch_comp_table = cnt['Customer_Staging_Mart']['csm_tabels']['branch_comp_status']
+
+        # odl tables
+        self.target_db = cnt['Customer_Staging_Mart']['cdd_odl_database']['information_database']
+        self.target_table = 'cdd_odl_store_comp_ind'
+        #self.target_table = cnt['Customer_Staging_Mart']['csm_odl_tables']['cdd_odl_store_comp_ind']
+
+    def run(self):
+        print("****************Execution Start****************")
+
+        # pull data required from branch_comp_status table in raw layer
+        branch_comp_status_df = spark.sql("SELECT DimBranchSK, DimCalSK, CompFlag FROM {}.{}".format(self.source_db,self.raw_branch_comp_table))
+
+        # pull data required from dim_branch table in raw layer
+        dim_branch_df = spark.sql("SELECT dim_branch_sk, branch_nbr FROM {}.{}".format(self.source_db, self.raw_branch_table))
+
+        # join branch to branch_comp_status on matching dim_branch_sk, disregard any unmatched. This gives a store number for each comp_status flag
+        store_comp_ind_df = dim_branch_df.join(branch_comp_status_df, on=[dim_branch_df.dim_branch_sk == branch_comp_status_df.DimBranchSK], how ='INNER')
+
+        # get calendar_cdw fields for the last 3 years
+        today = date.today()
+        three_years = today - timedelta(1096)
+        calendar_df = spark.sql("SELECT DimCalSK, asda_wk_nbr, day_date FROM {}.{} WHERE day_date BETWEEN '{}' AND '{}'".format(self.source_db,self.raw_calendar_table, three_years, today))
+        calendar_df = calendar_df.withColumn("num_month",F.concat((F.date_format(F.col("day_date"), "M")), F.lit("_"), (F.date_format(F.col("day_date"), "Y"))))
+
+        # join to calendar so that all weeks are shown whether they have a matching branch comp status or not
+        store_comp_ind_df = store_comp_ind_df.join(calendar_df, on=[store_comp_ind_df.DimCalSK == calendar_df.DimCalSK], how='RIGHT')
+        store_comp_ind_df = store_comp_ind_df.select(F.col('num_month'),F.col('branch_nbr'),F.col('CompFlag'))
+        store_comp_ind_df = store_comp_ind_df.distinct()
+
+        # for each store, group by month and apply max(compflag) to assign a compflag indicator to each week in the month.
+        max_comp_ind_df = store_comp_ind_df.groupBy('num_month', 'branch_nbr').agg(F.max('CompFlag').alias('CompFlag_max'))
+        max_comp_ind_df = max_comp_ind_df.distinct()
+
+        # join max_comp_ind_df to calendar to pick up week numbers again.
+        calendar_df = calendar_df.groupBy('asda_wk_nbr').agg(F.max('day_date').alias('max_date'))
+        calendar_df = calendar_df.withColumn("num_month",F.concat((F.date_format(F.col("max_date"), "M")), F.lit("_"), (F.date_format(F.col("max_date"), "Y"))))
+        calendar_df = calendar_df.select(F.col('num_month'), F.col('asda_wk_nbr'))
+        calendar_df = calendar_df.distinct()
+        output_df = max_comp_ind_df.join(calendar_df, on=['num_month'], how='RIGHT')
+
+        # select required columns from df and write to odl layer.
+        output_df = output_df.select(F.col('asda_wk_nbr').alias('week'), F.col('branch_nbr').alias('store_nbr'), F.col('CompFlag_max').alias('comp_ind'))
+        output_df = output_df.distinct()
+
+        output_df.write.mode('overwrite').saveAsTable("{}.{}".format(self.target_db, self.target_table))
+
+        print("************** SPARK JOB complete****************")
+
+ts = store_comp_ind()
+ts.run()
